@@ -10,10 +10,24 @@
 
   /* ─────────── Tauri / mock backend bridge ─────────── */
 
-  const isTauri = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+  // Tauri v2 only exposes window.__TAURI__ when `withGlobalTauri: true` is
+  // set in tauri.conf.json. Detect both the public API and the internal
+  // marker, then resolve `invoke` defensively with optional chaining so a
+  // missing global can't crash the whole script on load.
+  const isTauri = typeof window !== "undefined" && (
+    Boolean(window.__TAURI_INTERNALS__) || Boolean(window.__TAURI__)
+  );
   const invoke = isTauri
-    ? window.__TAURI__.core.invoke
+    ? (window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke || null)
     : null;
+
+  if (isTauri && !invoke) {
+    console.error(
+      "[Veil] Running inside Tauri but window.__TAURI__.core.invoke is missing. " +
+      "Did you set `app.withGlobalTauri: true` in tauri.conf.json? " +
+      "Falling back to mock backend — install/uninstall will NOT actually do anything."
+    );
+  }
 
   // Simulated latency for the mock backend — keeps the UI feeling real
   // without being instant/jarring.
