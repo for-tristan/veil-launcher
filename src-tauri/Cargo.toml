@@ -17,12 +17,21 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Tokio is already in Tauri's dependency tree; declaring it directly here
-# gives us access to `tokio::time::sleep` for the mocked async latencies
-# in commands (replace with `reqwest`-driven real I/O later).
-tokio = { version = "1", features = ["time"] }
+# gives us access to `tokio::time::sleep` and async filesystem I/O.
+tokio = { version = "1", features = ["time", "fs", "io-util"] }
+# Streaming HTTP downloads with progress reporting.
+reqwest = { version = "0.12", features = ["stream", "json"] }
+futures-util = "0.3"
+# .fantome packages are ZIPs.
+zip = "2"
+# xxhash64 of chunk paths is how WADs index their entries.
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+# Detect running League processes to refuse injection mid-match.
+sysinfo = "0.32"
 
 # Windows-only deps used for real LoL install path detection.
 # These are excluded on non-Windows targets so cross-compiles still work.

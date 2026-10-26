@@ -26,10 +26,6 @@
     </div>
 
     <div class="topbar-actions">
-      <div class="segmented" role="tablist" aria-label="Skin source">
-        <button id="source-local" class="seg-btn active" role="tab" aria-selected="true">Local</button>
-        <button id="source-repo" class="seg-btn" role="tab" aria-selected="false">Repo</button>
-      </div>
       <button id="add-skin-btn" class="btn-primary" title="Add a skin from file or URL">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
           <path d="M12 5v14M5 12h14" />
@@ -75,8 +71,7 @@
           <span id="content-champ-meta" class="content-meta"></span>
         </div>
         <div class="content-tools">
-          <span id="installed-count" class="pill pill-installed">0 installed</span>
-          <button id="uninstall-all" class="btn-ghost" disabled>Uninstall all</button>
+          <span id="applied-count" class="pill pill-applied">0 applied</span>
         </div>
       </div>
 
@@ -100,10 +95,14 @@
     </span>
     <span class="status-divider"></span>
     <span class="status-item">
-      <span id="installed-summary">0 skins active</span>
+      <span id="applied-summary">0 skins active</span>
     </span>
     <span class="status-spacer"></span>
-    <span class="status-item muted">Veil <span id="app-version">v0.1.0</span> · Tauri prototype</span>
+    <span class="status-item" id="league-running-warning" hidden style="color: var(--danger);">
+      <span class="dot dot-err"></span>
+      <span>League is running — close it to apply skins</span>
+    </span>
+    <span class="status-item muted">Veil launcher <span id="app-version">v0.1.0</span></span>
   </footer>
 
   <!-- ───────────────────────── Add Skin Modal ───────────────────────── -->
@@ -168,7 +167,57 @@
     </div>
   </div>
 
-  <!-- ───────────────────────── Install Toast ───────────────────────── -->
+  <!-- ───────────────────────── Settings Modal ───────────────────────── -->
+  <div id="settings-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div class="modal-head">
+        <h3 id="settings-modal-title">Settings</h3>
+        <button class="btn-icon" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- League of Legends install path -->
+        <div class="settings-section">
+          <div class="settings-label">League of Legends install path</div>
+          <div class="settings-value-row">
+            <span id="settings-lol-path" class="settings-value">Detecting…</span>
+          </div>
+          <div class="settings-help">Auto-detected from the Windows registry + filesystem. If the path is wrong, install League through the official Riot Client and the launcher will pick it up on next launch.</div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Dry Run mode</div>
+          <div class="settings-help">
+            When ON (default), Apply runs the full pipeline — download, extract, manifest parse — but skips the actual WAD chunk write. Use this to verify everything works before risking real game file modifications. Toggle OFF when you're ready for real skin injection.
+          </div>
+          <label class="toggle">
+            <input id="settings-dry-run-toggle" type="checkbox" checked />
+            <span class="toggle-slider"></span>
+            <span class="toggle-label" id="settings-dry-run-label">Dry Run is ON (no game files modified)</span>
+          </label>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Restore all skins</div>
+          <div class="settings-help">Walks the League of Legends Game folder and restores every <code>.bak</code> file it finds. Use this before a League patch, or as a panic button if anything goes wrong.</div>
+          <button id="settings-restore-btn" class="btn-ghost">Restore all skins</button>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">About</div>
+          <div class="settings-value">Veil launcher v0.1.0</div>
+          <div class="settings-value"><a href="https://github.com/for-tristan/veil-launcher" target="_blank" rel="noopener">github.com/for-tristan/veil-launcher</a></div>
+          <div class="settings-help" style="margin-top: 8px;">Not affiliated with or endorsed by Riot Games. League of Legends is a trademark of Riot Games, Inc. See <a href="https://github.com/for-tristan/veil-launcher/blob/main/LICENSE" target="_blank">LICENSE</a> for full terms.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── Toast ───────────────────────── -->
   <div id="toast" class="toast" hidden></div>
 
   <script src="mock-data.js"></script>
