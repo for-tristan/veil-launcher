@@ -63,17 +63,96 @@ pub struct OpResult {
 
 // ──────────────────────────── Commands ────────────────────────────
 
-/// Returns the detected League of Legends install path.
-/// In a real build, scan the Windows registry for the Riot client path,
-/// then resolve the LoL Game directory from there.
+/// Detects the League of Legends install path on the user's system.
+///
+/// Returns `Some(path)` pointing at the `Game/` subfolder (where the WAD
+/// files live) if found, or `None` if LoL is not installed.
+///
+/// Detection strategy (in order):
+///   1. Windows registry — HKLM\SOFTWARE\Riot Games\League of Legends
+///      (and the WOW6432Node mirror). This is where the official installer
+///      records the install path.
+///   2. Filesystem probe — walks common install locations across drives
+///      C-G in case the user installed manually or copied the game files.
+///
+/// If neither finds anything, the frontend shows "League of Legends not
+/// detected" in the status bar and the user can install LoL or manually
+/// point the launcher at the install path (future feature).
 #[tauri::command]
-async fn get_lol_path() -> Result<String, String> {
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    // TODO: real detection. Try:
-    //   - HKLM\SOFTWARE\Riot Games\League of Legends (InstallPath)
-    //   - Common paths: C:\Riot Games\League of Legends\
-    //   - LeagueClientUx.exe process introspection
-    Ok(r"C:\Riot Games\League of Legends\Game".to_string())
+async fn get_lol_path() -> Result<Option<String>, String> {
+    // Small delay so the "Detecting..." state actually shows in the status bar.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    #[cfg(windows)]
+    {
+        if let Some(path) = find_lol_in_registry() {
+            return Ok(Some(path));
+        }
+        if let Some(path) = find_lol_on_filesystem() {
+            return Ok(Some(path));
+        }
+    }
+
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn find_lol_in_registry() -> Option<String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    // Both 64-bit and 32-bit registry views. The WOW6432Node path catches
+    // 32-bit installs running on 64-bit Windows.
+    let subkeys = [
+        r"SOFTWARE\Riot Games\League of Legends",
+        r"SOFTWARE\WOW6432Node\Riot Games\League of Legends",
+    ];
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    for subkey in subkeys {
+        let Ok(install_root) = hklm.open_subkey(subkey) else { continue };
+        let Ok(install_path) = install_root.get_value::<String, _>("InstallPath") else {
+            continue;
+        };
+        // The registry value typically points to the root install directory.
+        // The actual game WAD files live in the "Game" subfolder.
+        let game_dir = std::path::Path::new(&install_path).join("Game");
+        if game_dir.exists() {
+            return Some(game_dir.to_string_lossy().to_string());
+        }
+        // Some installs record the Game path directly.
+        if std::path::Path::new(&install_path).exists() {
+            return Some(install_path);
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn find_lol_on_filesystem() -> Option<String> {
+    // Build a candidate list across drives C through G — covers most
+    // single-disk and multi-disk setups without taking too long.
+    let mut candidates: Vec<String> = Vec::new();
+    for drive in ["C", "D", "E", "F", "G"] {
+        candidates.push(format!("{}:\\Riot Games\\League of Legends", drive));
+        candidates.push(format!("{}:\\Riot Games\\League of Legends PBE", drive));
+        candidates.push(format!("{}:\\Program Files\\Riot Games\\League of Legends", drive));
+        candidates.push(format!("{}:\\Program Files (x86)\\Riot Games\\League of Legends", drive));
+        candidates.push(format!("{}:\\Games\\Riot Games\\League of Legends", drive));
+        candidates.push(format!("{}:\\League of Legends", drive));
+    }
+
+    for path in candidates {
+        let p = std::path::Path::new(&path);
+        let game_dir = p.join("Game");
+        if game_dir.exists() {
+            return Some(game_dir.to_string_lossy().to_string());
+        }
+        if p.exists() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// Returns the catalog of champions + skins shown in the launcher.

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:c8aa6e,100:1a1206&height=160&section=header&text=Veil&fontSize=72&font=Inter&fontColor=ffffff&fontAlignY=38&desc=League%20of%20Legends%20Skin%20Changer&descAlignY=72&descSize=14&descColor=c8aa6e" alt="Veil header" />
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:c8aa6e,100:1a1206&height=160&section=header&text=Veil%20launcher&fontSize=64&font=Inter&fontColor=ffffff&fontAlignY=38&desc=League%20of%20Legends%20Skin%20Changer&descAlignY=72&descSize=14&descColor=c8aa6e" alt="Veil launcher header" />
 
-<img src="src-tauri/icons/icon.png" alt="Veil" width="128" height="128" />
+<img src="src-tauri/icons/icon.png" alt="Veil launcher" width="128" height="128" />
 
 <br/>
 
@@ -28,7 +28,7 @@
 
 ## About
 
-Veil is a desktop launcher for browsing and applying custom League of Legends skin mods. It uses community-maintained skin packages from the [Alban1911/LeagueSkins](https://github.com/Alban1911/LeagueSkins) repository and official splash arts from Riot's Data Dragon CDN.
+Veil launcher is a desktop application for browsing and applying custom League of Legends skin mods. It uses community-maintained skin packages from the [Alban1911/LeagueSkins](https://github.com/Alban1911/LeagueSkins) repository and official splash arts from Riot's Data Dragon CDN.
 
 ### Features
 
@@ -60,6 +60,6 @@ This software is proprietary. See the [LICENSE](./LICENSE) file for full terms. 
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:c8aa6e,100:1a1206&height=100&section=footer" alt="Veil footer" />
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:c8aa6e,100:1a1206&height=100&section=footer" alt="Veil launcher footer" />
 
 </div>

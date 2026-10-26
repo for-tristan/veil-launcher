@@ -51,7 +51,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Veil ${{ github.ref_name }}'
+          releaseName: 'Veil launcher ${{ github.ref_name }}'
           releaseBody: |
             Download the matching installer for your machine below.
 

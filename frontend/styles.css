@@ -88,8 +88,7 @@ code {
 }
 .topbar button, .topbar input, .topbar select { -webkit-app-region: no-drag; }
 
-.brand { display: flex; align-items: center; gap: 8px; }
-.brand-name { font-weight: 800; font-size: 15px; letter-spacing: 0.4px; color: var(--text); }
+/* (brand area removed — topbar now starts directly with the search field) */
 
 .search {
   flex: 1;

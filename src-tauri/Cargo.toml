@@ -24,6 +24,11 @@ serde_json = "1"
 # in commands (replace with `reqwest`-driven real I/O later).
 tokio = { version = "1", features = ["time"] }
 
+# Windows-only deps used for real LoL install path detection.
+# These are excluded on non-Windows targets so cross-compiles still work.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
 # Keep the binary small — strip symbols in release.
 [profile.release]
 panic = "abort"
