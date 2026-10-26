@@ -1,5 +1,13 @@
-// wad.rs — Real WAD chunk injection for League of Legends.
+// wad.rs — Native WAD chunk injection (DEAD CODE — Veil switched to ltk_patcher
+// subprocess approach in commit 0c551f9. This module is kept for reference
+// in case the file-modification path needs to be revived.)
 //
+// Suppress all dead_code warnings since this module is intentionally unused.
+
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
 // FORMAT (per https://www.communitydragon.org/docs/wad):
 //
 //   WAD header (4 bytes):

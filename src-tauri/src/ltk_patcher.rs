@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use tauri::{AppHandle, Manager};
 
+#[allow(dead_code)] // cslol_dll + patcher_dll are stored for verification (we check the files exist) but not actually passed to any subprocess
 pub struct LtkTools {
     pub mod_tools_exe: PathBuf,
     pub cslol_dll: PathBuf,
@@ -234,14 +235,24 @@ impl LtkTools {
     /// The patcher stays alive, scanning for the game. When the game starts,
     /// it hooks file-reads and serves the overlay. When the game exits, the
     /// patcher exits too.
+    ///
+    /// stdout/stderr use Stdio::null() — we don't read patcher status events
+    /// (Rose does via a separate thread, but for simplicity Veil just lets
+    /// them go to /dev/null). Using Stdio::piped() without a reader thread
+    /// would block the patcher when its stdout buffer fills up.
+    ///
+    /// stdin is Stdio::piped() so we can send the config + start scan
+    /// commands. The caller (apply_skin) stores the Child in Tauri state
+    /// (PatcherState) so stdin stays open — otherwise dropping the Child
+    /// closes stdin → the patcher sees EOF → it exits before hooking.
     pub fn start_patcher(&self, overlay_dir: &Path) -> Result<Child, String> {
         let prefix = format!("{}\\",
             overlay_dir.to_string_lossy().trim_end_matches('\\').trim_end_matches('/'));
 
         let mut child = Command::new(&self.patcher_host)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to spawn patcher_host.exe: {}", e))?;
 
@@ -251,6 +262,8 @@ impl LtkTools {
             let _ = writeln!(stdin, "config flags 0");
             let _ = writeln!(stdin, "config prefix {}", prefix);
             let _ = writeln!(stdin, "start scan");
+            // Flush to make sure commands are sent immediately.
+            let _ = stdin.flush();
         }
 
         Ok(child)

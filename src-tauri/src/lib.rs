@@ -15,12 +15,50 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{async_runtime, AppHandle, Emitter, Manager};
 
 mod ltk_patcher;
 mod skin_data;
 mod wad;
+
+// ──────────────────────────── Patcher process state ────────────────────────────
+
+/// Holds the long-running `patcher_host.exe` subprocess so it stays alive
+/// between Tauri command calls. When apply_skin returns, the Child is NOT
+/// dropped — it's stored here, keeping stdin/stdout/stderr pipes open.
+///
+/// Without this, dropping the Child closes stdin → the patcher sees EOF →
+/// it exits prematurely → the game never gets hooked.
+///
+/// On the next apply_skin call, the previous Child is killed + waited on
+/// before starting a new one (one patcher at a time).
+struct PatcherState {
+    child: Mutex<Option<std::process::Child>>,
+}
+
+impl PatcherState {
+    fn new() -> Self {
+        Self { child: Mutex::new(None) }
+    }
+
+    /// Replace the current patcher (if any) with a new one. The previous
+    /// Child is killed + reaped to avoid orphan processes.
+    fn replace(&self, mut new_child: std::process::Child) {
+        let mut guard = self.child.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            // Try to kill the previous patcher. On Windows, killing a
+            // child process tree requires the PROCESS_TERMINATE access
+            // right which we have by default via spawn().
+            let _ = prev.kill();
+            let _ = prev.wait();
+        }
+        // We don't take stdin — leave it piped so the patcher can read
+        // the config commands we already wrote.
+        *guard = Some(new_child);
+    }
+}
 
 // ──────────────────────────── Types ────────────────────────────
 
@@ -589,8 +627,8 @@ async fn apply_skin(
         "phase": "starting-patcher",
     }));
 
-    let _patcher_child = match tools.start_patcher(&overlay_dir) {
-        Ok(c) => c, // the Child is intentionally dropped — the patcher runs detached
+    let patcher_child = match tools.start_patcher(&overlay_dir) {
+        Ok(c) => c,
         Err(e) => {
             let _ = app.emit("apply-progress", serde_json::json!({
                 "skinId": skin_id,
@@ -600,10 +638,14 @@ async fn apply_skin(
             return Ok(OpResult { ok: false, message: format!("Failed to start LTK patcher: {}", e) });
         }
     };
-    // Note: dropping the Child without .kill() means the patcher process
-    // is detached — it keeps running until either the game exits (the
-    // patcher self-exits) or the user kills it via Task Manager. This is
-    // the same behavior as Rose.
+
+    // Store the Child in app state so it stays alive after apply_skin
+    // returns. Without this, dropping the Child closes stdin → the
+    // patcher sees EOF → it exits before hooking the game. The patcher
+    // is now kept alive until either Veil exits or the next apply_skin
+    // call replaces it (PatcherState::replace kills the previous one).
+    let patcher_state = app.state::<PatcherState>();
+    patcher_state.replace(patcher_child);
 
     // 10. Update state.
     let mut state = load_state(&app);
@@ -736,7 +778,13 @@ async fn add_url_skin(url: String) -> Result<OpResult, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            // Register the long-running patcher state so apply_skin can
+            // store its Child handle here. The Child stays alive until
+            // either Veil exits or the next apply_skin call replaces it.
+            app.manage(PatcherState::new());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_lol_path,
             get_champions,
