@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Veil",
+  "version": "0.1.0",
+  "identifier": "com.veil.launcher",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Veil — LoL Skin Launcher",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 820,
+        "minHeight": 560,
+        "decorations": true,
+        "resizable": true,
+        "center": true,
+        "backgroundColor": "#0a0b0d"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' https://ddragon.leagueoflegends.com https://raw.communitydragon.org data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "category": "Game",
+    "shortDescription": "Minimalist League of Legends skin changer",
+    "longDescription": "Veil is a fast, lightweight, minimalist skin changer launcher for League of Legends. Browse, install, and manage community skin packs with a clean dark interface.",
+    "copyright": "",
+    "publisher": "Veil"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "veil-launcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimalist League of Legends skin changer launcher (Tauri v2)",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "preview": "npx --yes serve -l 1420 frontend",
+    "icons": "tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

@@ -1,0 +1,194 @@
+VEIL — PROPRIETARY SOURCE-AVAILABLE LICENSE
+============================================
+
+Version 1.0 — October 2026
+
+Copyright (c) 2026 Tristan. All rights reserved.
+
+------------------------------------------------------------------------
+
+1. DEFINITIONS
+
+   1.1. "Software" means the Veil launcher source code, binaries,
+        assets, scripts, documentation, and any derivative works
+        thereof, in whole or in part, as contained in this repository.
+
+   1.2. "Licensor" means the copyright holder, Tristan.
+
+   1.3. "Licensee" means any natural person who has been granted access
+        to view the Software under the terms of this License.
+
+   1.4. "Derivative Work" means any work that is based on or derived
+        from the Software, including but not limited to modifications,
+        forks, ports, translations, adaptations, or works that
+        incorporate any portion of the Software.
+
+   1.5. "Redistribute" means to reproduce, publish, distribute, host,
+        transmit, broadcast, syndicate, or otherwise make available
+        the Software or any Derivative Work to any third party by any
+        means, including but not limited to: source code repositories
+        (public or private), websites, package managers, app stores,
+        peer-to-peer networks, or physical media.
+
+------------------------------------------------------------------------
+
+2. GRANT OF RIGHTS
+
+   Subject to the terms and conditions of this License, the Licensor
+   hereby grants the Licensee a non-exclusive, non-transferable,
+   non-sublicensable, revocable, worldwide, royalty-free, personal
+   license to:
+
+   2.1. **View** the source code of the Software for personal,
+        non-commercial reference and educational purposes only.
+
+   This License does NOT grant any other rights. All rights not
+   expressly granted herein are reserved by the Licensor.
+
+------------------------------------------------------------------------
+
+3. PROHIBITED ACTIONS
+
+   The Licensee shall NOT, without prior express written permission
+   from the Licensor:
+
+   3.1. **Redistribute** the Software or any Derivative Work, in whole
+        or in part, by any means, to any third party. This includes
+        but is not limited to:
+          - Publishing the Software on any public or private source
+            code repository (including GitHub, GitLab, Bitbucket, or
+            any successor service), whether as the original, a fork,
+            a mirror, or part of another project.
+          - Hosting the Software on any website, FTP server, file
+            sharing service, package manager, or app store.
+          - Distributing the Software via peer-to-peer networks,
+            email, physical media, or any other channel.
+
+   3.2. **Create Derivative Works** based on the Software, including
+        but not limited to: modifying, extending, porting, translating,
+        or adapting the Software or any portion thereof.
+
+   3.3. **Use the Software commercially** in any way, including but not
+        limited to:
+          - Selling the Software or any service that incorporates it.
+          - Using the Software as part of a paid product, service, or
+            offering.
+          - Using the Software to provide a service to third parties
+            for compensation.
+          - Using the Software internally for any commercial purpose
+            within a business or organization.
+
+   3.4. **Submit contributions, pull requests, patches, or modifications**
+        to the Licensor or any third party. The Licensor does not accept
+        external contributions. All development is done exclusively by
+        the Licensor.
+
+   3.5. **Remove, alter, or obscure** any copyright notice, license
+        notice, attribution, or other proprietary markings on or in
+        the Software.
+
+   3.6. **Use the name "Veil", the Licensor's name, or any associated
+        trademarks, service marks, or branding** to endorse, promote,
+        or represent any product, service, or work without prior
+        express written permission.
+
+   3.7. **Reverse engineer, decompile, or disassemble** any precompiled
+        binary versions of the Software, except to the extent such
+        activity is expressly permitted by applicable law despite this
+        limitation.
+
+------------------------------------------------------------------------
+
+4. OWNERSHIP
+
+   The Software is the proprietary property of the Licensor. The
+   Licensor retains all right, title, and interest in and to the
+   Software, including but not limited to all intellectual property
+   rights therein. This License does NOT transfer any ownership of
+   the Software to the Licensee.
+
+------------------------------------------------------------------------
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+   NON-INFRINGEMENT. THE LICENSOR DOES NOT WARRANT THAT THE SOFTWARE
+   WILL BE ERROR-FREE, SECURE, OR SUITABLE FOR ANY PARTICULAR PURPOSE.
+
+------------------------------------------------------------------------
+
+6. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+   INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING
+   BUT NOT LIMITED TO LOSS OF DATA, BUSINESS INTERRUPTION, OR
+   EQUIPMENT FAILURE) ARISING OUT OF OR IN CONNECTION WITH THE SOFTWARE
+   OR THE USE OR OTHER DEALINGS IN THE SOFTWARE, EVEN IF THE LICENSOR
+   HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+   THE LICENSEE ASSUMES ALL RISK ASSOCIATED WITH USING THE SOFTWARE,
+   INCLUDING BUT NOT LIMITED TO THE RISK OF MODIFYING GAME FILES,
+   POTENTIAL ACCOUNT SANCTIONS, AND HARDWARE OR SOFTWARE DAMAGE.
+
+------------------------------------------------------------------------
+
+7. TERMINATION
+
+   This License is effective until terminated. The Licensor may
+   terminate this License at any time, for any reason or no reason,
+   without notice. Upon termination, the Licensee shall immediately
+   cease all use of the Software and destroy all copies in their
+   possession. The provisions of Sections 3, 4, 5, 6, 8, and 9 shall
+   survive any termination of this License.
+
+------------------------------------------------------------------------
+
+8. APPLICABLE LAW
+
+   This License shall be governed by and construed in accordance with
+   the laws of the Licensor's jurisdiction, without regard to its
+   conflict of laws principles. Any disputes arising under this
+   License shall be resolved in the courts of the Licensor's
+   jurisdiction.
+
+------------------------------------------------------------------------
+
+9. THIRD-PARTY ASSETS
+
+   The Software references and interoperates with third-party assets
+   and services that are NOT covered by this License and remain the
+   property of their respective owners:
+
+   9.1. **League of Legends** and all related properties are trademarks
+        of Riot Games, Inc. The Software is not affiliated with or
+        endorsed by Riot Games.
+
+   9.2. **Skin packages (.fantome files)** are sourced from the
+        [Alban1911/LeagueSkins](https://github.com/Alban1911/LeagueSkins)
+        community repository, which is licensed under its own terms.
+        The Licensor of this Software does not own or control those
+        skin packages.
+
+   9.3. **Splash art images** are served from Riot's Data Dragon CDN
+        and are the property of Riot Games, Inc.
+
+   9.4. **Tauri, Rust, and other open-source dependencies** are
+        licensed under their respective licenses. Nothing in this
+        License overrides those licenses.
+
+------------------------------------------------------------------------
+
+10. ENTIRE AGREEMENT
+
+    This License constitutes the entire agreement between the Licensor
+    and the Licensee with respect to the Software. Any modification to
+    this License must be in writing and signed by the Licensor. If any
+    provision of this License is held to be unenforceable, the
+    remaining provisions shall remain in full force and effect.
+
+------------------------------------------------------------------------
+
+For permissions or inquiries, contact the Licensor via GitHub:
+https://github.com/for-tristan

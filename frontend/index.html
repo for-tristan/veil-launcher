@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Veil — LoL Skin Launcher</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="../src-tauri/icons/icon.png" />
+</head>
+<body>
+  <!-- ───────────────────────── Top Bar ───────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">Veil</span>
+    </div>
+
+    <div class="search">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m21 21-4.3-4.3" />
+      </svg>
+      <input id="search-input" type="search" placeholder="Search champion or skin…" autocomplete="off" />
+      <button id="search-clear" class="search-clear" hidden aria-label="Clear search">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+      <kbd id="search-kbd">/</kbd>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="segmented" role="tablist" aria-label="Skin source">
+        <button id="source-local" class="seg-btn active" role="tab" aria-selected="true">Local</button>
+        <button id="source-repo" class="seg-btn" role="tab" aria-selected="false">Repo</button>
+      </div>
+      <button id="add-skin-btn" class="btn-primary" title="Add a skin from file or URL">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span>Add skin</span>
+      </button>
+      <button id="settings-btn" class="btn-icon" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H10a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V10a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ───────────────────────── Main Split ───────────────────────── -->
+  <main class="layout">
+    <!-- Sidebar: Champions -->
+    <aside class="sidebar" aria-label="Champion list">
+      <div class="sidebar-header">
+        <span class="sidebar-title">Champions</span>
+        <span id="champion-count" class="sidebar-count">0</span>
+      </div>
+      <div class="sidebar-filter">
+        <select id="role-filter" aria-label="Filter by role">
+          <option value="all">All roles</option>
+          <option value="top">Top</option>
+          <option value="jungle">Jungle</option>
+          <option value="mid">Mid</option>
+          <option value="adc">ADC</option>
+          <option value="support">Support</option>
+        </select>
+      </div>
+      <ul id="champion-list" class="champion-list" role="list"></ul>
+      <div id="champion-empty" class="empty-hint" hidden>No champions match.</div>
+    </aside>
+
+    <!-- Content: Skin grid -->
+    <section class="content" aria-label="Skins">
+      <div class="content-header">
+        <div class="content-title">
+          <h2 id="content-champ-name">—</h2>
+          <span id="content-champ-meta" class="content-meta"></span>
+        </div>
+        <div class="content-tools">
+          <span id="installed-count" class="pill pill-installed">0 installed</span>
+          <button id="uninstall-all" class="btn-ghost" disabled>Uninstall all</button>
+        </div>
+      </div>
+
+      <div id="skin-grid" class="skin-grid"></div>
+
+      <div id="skin-empty" class="empty-state" hidden>
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M3 12c3-6 15-6 18 0-3 6-15 6-18 0Z" />
+          <circle cx="12" cy="12" r="2.4" />
+        </svg>
+        <p>No skins found.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ───────────────────────── Status Bar ───────────────────────── -->
+  <footer class="statusbar">
+    <span class="status-item">
+      <span id="lol-status-dot" class="dot dot-ok"></span>
+      <span id="lol-status-text">Detecting League of Legends…</span>
+    </span>
+    <span class="status-divider"></span>
+    <span class="status-item">
+      <span id="installed-summary">0 skins active</span>
+    </span>
+    <span class="status-spacer"></span>
+    <span class="status-item muted">Veil <span id="app-version">v0.1.0</span> · Tauri prototype</span>
+  </footer>
+
+  <!-- ───────────────────────── Add Skin Modal ───────────────────────── -->
+  <div id="add-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+      <div class="modal-head">
+        <h3 id="add-modal-title">Add skin</h3>
+        <button class="btn-icon" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-tabs">
+          <button class="modal-tab active" data-tab="file">From file</button>
+          <button class="modal-tab" data-tab="url">From URL</button>
+        </div>
+
+        <div class="modal-pane" data-pane="file">
+          <p class="modal-hint">Choose a <code>.fantome</code> skin package from disk (CSLOL format from the Rose community repo).</p>
+          <div id="dropzone" class="dropzone" tabindex="0">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M12 16V4M7 9l5-5 5 5" />
+              <path d="M5 20h14" />
+            </svg>
+            <span class="dz-main">Drop file here or click to browse</span>
+            <span class="dz-hint">.fantome · max 200 MB</span>
+          </div>
+          <input id="file-input" type="file" accept=".fantome,.zip,.wad.client" hidden />
+          <div id="file-info" class="file-info" hidden>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M14 3v5h5" />
+              <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            </svg>
+            <div class="file-info-text">
+              <span id="file-name" class="file-name"></span>
+              <span id="file-meta" class="file-meta"></span>
+            </div>
+            <button id="file-clear" class="btn-icon" aria-label="Clear">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-pane" data-pane="url" hidden>
+          <p class="modal-hint">Paste a direct link to a <code>.fantome</code> skin package. The launcher will fetch & verify it.</p>
+          <input id="url-input" type="url" class="text-input" placeholder="https://raw.githubusercontent.com/Alban1911/LeagueSkins/main/skins/103/103015/103015.fantome" />
+          <div class="url-presets">
+            <span class="url-presets-label">Quick picks:</span>
+            <button class="chip" data-url="https://raw.githubusercontent.com/Alban1911/LeagueSkins/main/skins/103/103015/103015.fantome">Ahri · K/DA</button>
+            <button class="chip" data-url="https://raw.githubusercontent.com/Alban1911/LeagueSkins/main/skins/157/157002/157002.fantome">Yasuo · PROJECT</button>
+            <button class="chip" data-url="https://raw.githubusercontent.com/Alban1911/LeagueSkins/main/skins/222/222002/222002.fantome">Jinx · Firecracker</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" data-close>Cancel</button>
+        <button id="add-confirm" class="btn-primary" disabled>Add skin</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────────────────── Install Toast ───────────────────────── -->
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="mock-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
