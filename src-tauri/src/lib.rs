@@ -67,7 +67,10 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            dry_run: true,
+            // Real injection by default. The .bak file backup is the safety
+            // net — Restore All from Settings always recovers the original
+            // WAD files even if a buggy parser writes garbage.
+            dry_run: false,
             lol_path_override: None,
         }
     }
@@ -152,16 +155,15 @@ fn is_league_running_sync() -> bool {
 
     for (_, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
-        // The actual game executable (in-match). Hard block.
+        // League of Legends.exe is the in-match executable. The WAD files
+        // are memory-mapped while it runs — NEVER inject mid-match or the
+        // match can crash or corrupt.
         if name == "league of legends.exe" {
             return true;
         }
-        // The client UI (lobby, champ select, store). Soft block — the
-        // WAD files aren't memory-mapped here, but the client may have
-        // open handles that prevent writes.
-        if name == "leagueclientux.exe" || name == "leagueclient.exe" {
-            return true;
-        }
+        // LeagueClientUx.exe + LeagueClient.exe are the lobby/champ-select
+        // UI. They don't hold WADs in memory — injecting while they're
+        // running is safe. The user can apply a skin during champ select.
     }
     false
 }

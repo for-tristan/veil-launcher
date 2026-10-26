@@ -192,12 +192,13 @@
         <div class="settings-section">
           <div class="settings-label">Dry Run mode</div>
           <div class="settings-help">
-            When ON (default), Apply runs the full pipeline — download, extract, manifest parse — but skips the actual WAD chunk write. Use this to verify everything works before risking real game file modifications. Toggle OFF when you're ready for real skin injection.
+            When OFF (default), Apply downloads the .fantome, remaps its chunk paths to override the champion's default skin (skin0), and writes the new chunk bytes into the WAD file. A <code>.bak</code> backup of the original WAD is created first — use Restore All to recover if anything goes wrong.<br/><br/>
+            When ON, Apply runs the full pipeline except the actual WAD write — useful for verifying the download/extraction steps without touching game files.
           </div>
           <label class="toggle">
-            <input id="settings-dry-run-toggle" type="checkbox" checked />
+            <input id="settings-dry-run-toggle" type="checkbox" />
             <span class="toggle-slider"></span>
-            <span class="toggle-label" id="settings-dry-run-label">Dry Run is ON (no game files modified)</span>
+            <span class="toggle-label" id="settings-dry-run-label">Real injection is ON (game files will be modified)</span>
           </label>
         </div>
 
