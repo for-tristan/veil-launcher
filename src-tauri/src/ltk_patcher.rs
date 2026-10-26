@@ -62,13 +62,45 @@ impl LtkTools {
     pub fn find(app: &AppHandle) -> Result<Self, String> {
         let mut search_paths: Vec<PathBuf> = Vec::new();
 
-        // 1. Veil's bundled resource directory (patcher_host.exe + patcher_dll.dll
-        //    + mod-tools.exe all live here after install).
+        // 1. Veil's bundled resource directory. Tauri v2's `resource_dir()`
+        //    behavior varies:
+        //    - When run from an installer (NSIS/MSI), it returns the install
+        //      dir's resources subdir: <install_dir>\resources\
+        //    - When run as a bare .exe (e.g., from Downloads), it returns
+        //      the .exe's containing directory (where the resources are NOT).
+        //    We push BOTH `resource_dir()` AND `resource_dir()/resources` to
+        //    cover both cases.
         if let Ok(res_dir) = app.path().resource_dir() {
-            search_paths.push(res_dir);
+            search_paths.push(res_dir.clone());
+            search_paths.push(res_dir.join("resources"));
         }
 
-        // 2. User-configurable tools directory from settings.
+        // 2. The directory containing the currently-running .exe (veil.exe).
+        //    When running as a bare .exe, this is the same as resource_dir.
+        //    When running installed, this is the install dir.
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                search_paths.push(exe_dir.to_path_buf());
+                search_paths.push(exe_dir.join("resources"));
+            }
+        }
+
+        // 3. Tauri's per-user install directory on Windows. NSIS installers
+        //    install to %LOCALAPPDATA%\<productName>\ by default.
+        if let Some(local_app) = std::env::var_os("LOCALAPPDATA") {
+            search_paths.push(PathBuf::from(&local_app).join("Veil launcher").join("resources"));
+            search_paths.push(PathBuf::from(&local_app).join("Programs").join("Veil launcher").join("resources"));
+            search_paths.push(PathBuf::from(&local_app).join("Veil launcher"));
+            search_paths.push(PathBuf::from(&local_app).join("Programs").join("Veil launcher"));
+        }
+        // Per-machine install dir.
+        if let Some(prog_files) = std::env::var_os("PROGRAMFILES") {
+            search_paths.push(PathBuf::from(&prog_files).join("Veil launcher").join("resources"));
+            search_paths.push(PathBuf::from(&prog_files).join("Veil launcher"));
+        }
+
+        // 4. User-configurable tools directory from settings (highest priority
+        //    for explicit overrides).
         if let Some(s) = std::fs::read_to_string(
             app.path().app_config_dir().unwrap_or_default().join("settings.json")
         ).ok()
@@ -79,12 +111,12 @@ impl LtkTools {
             }
         }
 
-        // 3. %APPDATA%\com.veil.launcher\tools\
+        // 5. %APPDATA%\com.veil.launcher\tools\ — user can drop binaries here.
         if let Ok(app_config) = app.path().app_config_dir() {
             search_paths.push(app_config.join("tools"));
         }
 
-        // 4. Fallback: LTK Manager's default install paths (for users who
+        // 6. Fallback: LTK Manager's default install paths (for users who
         //    installed LTK Manager and want to use those binaries directly
         //    without copying).
         if let Some(prog_files) = std::env::var_os("PROGRAMFILES") {
@@ -95,8 +127,7 @@ impl LtkTools {
             search_paths.push(PathBuf::from(&local_app).join("Programs").join("LTK Manager"));
         }
 
-        // 5. Rose install paths (for users who have Rose — provides mod-tools.exe
-        //    + cslol-dll.dll in Rose's injection/tools/ folder).
+        // 7. Rose install paths (for users with Rose installed).
         if let Some(prog_files) = std::env::var_os("PROGRAMFILES") {
             search_paths.push(PathBuf::from(&prog_files).join("Rose").join("injection").join("tools"));
         }
