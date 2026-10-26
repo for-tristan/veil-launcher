@@ -167,6 +167,7 @@
     addModal: $("#add-modal"),
     settingsModal: $("#settings-modal"),
     settingsLolPath: $("#settings-lol-path"),
+    settingsToolsDir: $("#settings-tools-dir"),
     settingsDryRunToggle: $("#settings-dry-run-toggle"),
     settingsDryRunLabel: $("#settings-dry-run-label"),
     settingsRestoreBtn: $("#settings-restore-btn"),
@@ -361,6 +362,9 @@
       downloaded: "Downloaded",
       extracting: "Extracting",
       replacing: "Replacing previous skin",
+      "finding-tools": "Finding LTK tools",
+      "creating-overlay": "Creating overlay",
+      "starting-patcher": "Starting patcher",
       injecting: current != null && total
         ? `Injecting (${current}/${total})`
         : "Injecting",
@@ -547,6 +551,8 @@
     async refresh() {
       // LoL path
       el.settingsLolPath.textContent = state.lolPath || "Not detected";
+      // Tools directory
+      el.settingsToolsDir.value = state.settings.toolsDir || "";
       // Dry Run toggle
       el.settingsDryRunToggle.checked = state.settings.dryRun;
       this.updateDryRunLabel();
@@ -554,8 +560,8 @@
     updateDryRunLabel() {
       const on = el.settingsDryRunToggle.checked;
       el.settingsDryRunLabel.textContent = on
-        ? "Dry Run is ON (no game files modified)"
-        : "Real injection is ON (game files will be modified — use at your own risk)";
+        ? "Dry Run is ON — native WAD modification mode (experimental, may not work)"
+        : "Real injection is ON — uses ltk_patcher subprocess (recommended)";
     },
     async toggleDryRun() {
       const dryRun = el.settingsDryRunToggle.checked;
@@ -564,14 +570,25 @@
         await backend("set_settings", { dryRun });
         state.settings.dryRun = dryRun;
         toast(dryRun
-          ? "Dry Run enabled — Apply will skip WAD writes."
-          : "Real injection enabled — Apply will modify game files.",
+          ? "Dry Run enabled — Apply will skip the patcher and try native WAD modification (may fail)."
+          : "Real injection enabled — Apply uses ltk_patcher (recommended).",
           dryRun ? "default" : "ok");
       } catch (e) {
         toast(`Failed to save setting: ${e.message}`, "err");
-        // Revert
         el.settingsDryRunToggle.checked = !dryRun;
         this.updateDryRunLabel();
+      }
+    },
+    async saveToolsDir() {
+      const toolsDir = el.settingsToolsDir.value.trim() || null;
+      try {
+        await backend("set_settings", { toolsDir });
+        state.settings.toolsDir = toolsDir;
+        toast(toolsDir
+          ? `Tools directory set to: ${toolsDir}`
+          : "Tools directory cleared — Veil will auto-detect.");
+      } catch (e) {
+        toast(`Failed to save tools directory: ${e.message}`, "err");
       }
     },
   };
@@ -690,6 +707,8 @@
       if (e.target.closest("[data-close]")) settingsModal.close();
     });
     el.settingsDryRunToggle.addEventListener("change", () => settingsModal.toggleDryRun());
+    el.settingsToolsDir.addEventListener("change", () => settingsModal.saveToolsDir());
+    el.settingsToolsDir.addEventListener("blur", () => settingsModal.saveToolsDir());
     el.settingsRestoreBtn.addEventListener("click", () => {
       settingsModal.close();
       restoreAll();

@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{async_runtime, AppHandle, Emitter, Manager};
 
+mod ltk_patcher;
 mod skin_data;
 mod wad;
 
@@ -54,24 +55,27 @@ pub struct OpResult {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    /// When true (default), the apply flow runs download + extraction but
-    /// skips the actual WAD chunk write. Toggle off in Settings once you've
-    /// verified the flow works and you accept the risk of modifying game
-    /// files.
+    /// When true, the apply flow skips WAD chunk injection entirely (used
+    /// only when the user explicitly wants to test the file-modification
+    /// path in wad.rs). Default is false — Veil uses the ltk_patcher
+    /// subprocess approach (mirrors Rose), which is the only path that
+    /// actually works for runtime skin injection.
     pub dry_run: bool,
-    /// Manual override for the LoL install path. When None, the launcher
-    /// auto-detects via registry + filesystem probe.
+    /// Manual override for the LoL install path.
     pub lol_path_override: Option<String>,
+    /// Manual override for the tools directory (where ltk_patcher_host.exe,
+    /// ltk_patcher_dll.dll, mod-tools.exe, and cslol-dll.dll live). If None,
+    /// Veil searches %APPDATA%\com.veil.launcher\tools\, the resource_dir
+    /// (bundled mod-tools.exe lives here), and LTK Manager's install path.
+    pub tools_dir: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            // Real injection by default. The .bak file backup is the safety
-            // net — Restore All from Settings always recovers the original
-            // WAD files even if a buggy parser writes garbage.
             dry_run: false,
             lol_path_override: None,
+            tools_dir: None,
         }
     }
 }
@@ -293,6 +297,7 @@ async fn set_settings(
     app: AppHandle,
     dry_run: Option<bool>,
     lol_path_override: Option<Option<String>>,
+    tools_dir: Option<Option<String>>,
 ) -> Result<(), String> {
     let mut s = load_settings(&app);
     if let Some(dr) = dry_run {
@@ -300,6 +305,9 @@ async fn set_settings(
     }
     if let Some(override_path) = lol_path_override {
         s.lol_path_override = override_path;
+    }
+    if let Some(tools) = tools_dir {
+        s.tools_dir = tools;
     }
     save_settings_inner(&app, &s);
     Ok(())
@@ -387,96 +395,44 @@ pub struct FantomeEntry {
     pub data: Vec<u8>,
 }
 
-/// Extract the .fantome (a renamed ZIP) and return the list of chunk
-/// entries to inject into WADs.
-pub fn extract_fantome(file_path: &std::path::Path) -> Result<Vec<FantomeEntry>, String> {
+/// Extract the .fantome (a renamed ZIP) to a directory, preserving the
+/// ZIP's folder structure. This is what ltk_patcher's mkoverlay expects —
+/// it reads the extracted mod directory and produces an overlay file
+/// from it.
+pub fn extract_fantome_to_dir(file_path: &std::path::Path, dest_dir: &std::path::Path) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(dest_dir);
     let file = std::fs::File::open(file_path)
         .map_err(|e| format!("Failed to open .fantome: {}", e))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| format!("Failed to read .fantome (not a valid ZIP): {}", e))?;
 
-    // Try to read META/filelist.json. The format varies across CSLOL versions;
-    // we support the common shapes:
-    //   { "entries": [ { "path": "...", "archive": "..." } ] }
-    //   { "name1": "archive1.wad", "name2": "archive2.wad", ... }
-    let mut entries = Vec::new();
+    for i in 0..archive.len() {
+        let mut zip_file = archive.by_index(i)
+            .map_err(|e| format!("Failed to read ZIP entry {}: {}", i, e))?;
 
-    if let Ok(filelist_reader) = archive.by_name("META/filelist.json") {
-        let filelist: serde_json::Value = serde_json::from_reader(filelist_reader)
-            .map_err(|e| format!("Failed to parse filelist.json: {}", e))?;
+        let out_path = match zip_file.enclosed_name() {
+            Some(name) => dest_dir.join(name),
+            None => continue,
+        };
 
-        if let Some(arr) = filelist.get("entries").and_then(|v| v.as_array()) {
-            for entry in arr {
-                let zip_path = entry.get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let target_wad = entry.get("archive")
-                    .or_else(|| entry.get("wad"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if !zip_path.is_empty() && !target_wad.is_empty() {
-                    entries.push((zip_path, target_wad));
-                }
+        if zip_file.is_dir() {
+            let _ = std::fs::create_dir_all(&out_path);
+        } else {
+            if let Some(parent) = out_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
-        } else if let Some(obj) = filelist.as_object() {
-            // name → archive mapping
-            for (zip_path, archive_val) in obj {
-                if let Some(target_wad) = archive_val.as_str() {
-                    entries.push((zip_path.clone(), target_wad.to_string()));
-                }
-            }
+            let mut out_file = std::fs::File::create(&out_path)
+                .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+            use std::io::Copy;
+            std::io::copy(&mut zip_file, &mut out_file)
+                .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))?;
         }
     }
 
-    // If no filelist found, fall back to assuming the ZIP's own structure
-    // matches the WAD chunk paths (some .fantome variants do this).
-    if entries.is_empty() {
-        for i in 0..archive.len() {
-            let zip_file = archive.by_index(i)
-                .map_err(|e| format!("Failed to read ZIP entry {}: {}", i, e))?;
-            let name = zip_file.name().to_string();
-            // Skip META/ entries; treat the rest as chunk paths.
-            if !name.starts_with("META/") && !zip_file.is_dir() {
-                // We don't know the target WAD — default to the champion's WAD.
-                entries.push((name.clone(), String::new()));
-            }
-        }
-    }
-
-    // Now extract each entry's bytes from the ZIP.
-    let mut result = Vec::new();
-    for (zip_path, target_wad) in entries {
-        // The chunk_path is the logical path inside the WAD. The .fantome
-        // stores files at paths like "ASSETS/characters/ahri/skins/skin15/..."
-        // which need to be lowercased for WAD path matching.
-        let chunk_path = zip_path
-            .replace('\\', "/")
-            .to_lowercase();
-
-        if let Ok(mut zip_file) = archive.by_name(&zip_path) {
-            let mut data = Vec::with_capacity(zip_file.size() as usize);
-            use std::io::Read;
-            if zip_file.read_to_end(&mut data).is_ok() {
-                result.push(FantomeEntry {
-                    zip_path,
-                    chunk_path,
-                    target_wad,
-                    data,
-                });
-            }
-        }
-    }
-
-    if result.is_empty() {
-        return Err("No skin entries found in .fantome manifest".into());
-    }
-
-    Ok(result)
+    Ok(())
 }
 
-// ──────────────────────────── apply_skin (was install_skin) ────────────────────────────
+// ──────────────────────────── apply_skin (uses ltk_patcher subprocess approach) ────────────────────────────
 
 #[tauri::command]
 async fn apply_skin(
@@ -484,18 +440,19 @@ async fn apply_skin(
     skin_id: String,
     download_url: String,
 ) -> Result<OpResult, String> {
-    // 1. Verify League isn't running
+    // 1. Verify League isn't in an active match (client/lobby is fine)
     let running = async_runtime::spawn_blocking(|| is_league_running_sync())
         .await
         .map_err(|e| format!("Process check failed: {}", e))?;
     if running {
         return Ok(OpResult {
             ok: false,
-            message: "League of Legends is currently running. Close it before applying skins.".into(),
+            message: "A League of Legends match is in progress. The LTK patcher can only hook before a match starts — close the game and apply again.".into(),
         });
     }
 
-    // 2. Get LoL install path
+    // 2. Find the LoL install path (only used for reference; the LTK patcher
+    //    doesn't actually need it — it scans the system for the game itself).
     let lol_path = match effective_lol_path(&app) {
         Some(p) => p,
         None => return Ok(OpResult {
@@ -503,7 +460,7 @@ async fn apply_skin(
             message: "League of Legends is not detected. Open Settings to set the install path manually.".into(),
         }),
     };
-    let game_dir = PathBuf::from(lol_path);
+    let _ = lol_path; // we don't pass it to ltk_patcher; the patcher finds the game itself
 
     // 3. Parse champion_id from skin_id (e.g., "Ahri_103015" → "Ahri")
     let champion_id = skin_id.split('_').next().unwrap_or("").to_string();
@@ -514,23 +471,22 @@ async fn apply_skin(
         });
     }
 
-    // 4. One-skin-per-champion rule: if another skin of this champion is
-    // already applied, restore its .bak first to undo it.
+    // 4. One-skin-per-champion rule: clear the previous patcher's overlay
+    //    if a different skin of this champion was applied. (ltk_patcher
+    //    handles overlay cleanup itself, so we just update our state.)
     let state = load_state(&app);
     if let Some(existing) = state.applied_skins.get(&champion_id) {
         if existing != &skin_id {
             let _ = app.emit("apply-progress", serde_json::json!({
                 "skinId": skin_id,
                 "phase": "replacing",
-                "message": format!("Replacing previously applied skin with this one..."),
+                "message": format!("Replacing previously applied skin..."),
             }));
-            let _ = wad::uninstall_skin_for_champion(&game_dir, &champion_id).await;
         }
     }
 
-    // 5. Resolve the cached .fantome path. If the file is already cached
-    //    (from a previous Apply), skip the download. Otherwise download
-    //    with progress + persist to the cache.
+    // 5. Resolve the cached .fantome path (persistent cache so re-applying
+    //    doesn't re-download).
     let _ = std::fs::create_dir_all(cache_dir(&app));
     let cached_path = fantome_cache_path(&app, &skin_id);
 
@@ -556,59 +512,92 @@ async fn apply_skin(
         }
     }
 
-    // 6. Extract the .fantome (always from the cache path).
+    // 6. Extract the .fantome to a mod folder (preserves ZIP structure).
+    //    ltk_patcher's mkoverlay expects an extracted mod directory.
+    let mods_dir = config_dir(&app).join("mods").join(skin_id.replace('/', "_").replace('\\', "_"));
+    // Clear any previous extraction of this skin (in case the .fantome
+    // contents changed since last apply).
+    let _ = std::fs::remove_dir_all(&mods_dir);
+    let _ = std::fs::create_dir_all(&mods_dir);
+
     let _ = app.emit("apply-progress", serde_json::json!({
         "skinId": skin_id,
         "phase": "extracting",
     }));
 
-    let manifest = match extract_fantome(&cached_path) {
-        Ok(m) => m,
-        Err(e) => {
-            // The cached file might be corrupt — delete it so the next
-            // Apply re-downloads a fresh copy.
-            let _ = std::fs::remove_file(&cached_path);
-            return Ok(OpResult { ok: false, message: e });
+    if let Err(e) = extract_fantome_to_dir(&cached_path, &mods_dir) {
+        let _ = std::fs::remove_file(&cached_path); // corrupt cache; re-download next time
+        return Ok(OpResult { ok: false, message: format!("Failed to extract .fantome: {}", e) });
+    }
+
+    // 7. Find the LTK tools (mod-tools.exe + cslol-dll.dll + ltk_patcher_host.exe
+    //    + ltk_patcher_dll.dll). Returns a clear error listing which tools
+    //    are missing and where to get them.
+    let _ = app.emit("apply-progress", serde_json::json!({
+        "skinId": skin_id,
+        "phase": "finding-tools",
+    }));
+
+    let tools = match ltk_patcher::LtkTools::find(&app) {
+        Ok(t) => t,
+        Err(missing) => {
+            let _ = app.emit("apply-progress", serde_json::json!({
+                "skinId": skin_id,
+                "phase": "error",
+                "message": missing,
+            }));
+            return Ok(OpResult { ok: false, message: missing });
         }
     };
 
-    // 7. Inject into WADs (or simulate when dry_run)
-    let settings = load_settings(&app);
+    // 8. Run mod-tools.exe mkoverlay <mods_dir> <overlay_dir>
+    let overlay_dir = config_dir(&app).join("overlay").join(skin_id.replace('/', "_").replace('\\', "_"));
+    let _ = std::fs::remove_dir_all(&overlay_dir);
+    let _ = std::fs::create_dir_all(&overlay_dir.parent().unwrap_or(&overlay_dir));
 
     let _ = app.emit("apply-progress", serde_json::json!({
         "skinId": skin_id,
-        "phase": "injecting",
-        "total": manifest.len(),
-        "current": 0,
+        "phase": "creating-overlay",
     }));
 
-    let inject_result = wad::apply_manifest(
-        &game_dir,
-        &champion_id,
-        &manifest,
-        settings.dry_run,
-        &app,
-        &skin_id,
-    ).await;
-
-    // 8. Note: the cached .fantome file is NOT deleted — it stays in the
-    //    cache so re-applying this skin doesn't re-download.
-
-    if let Err(e) = inject_result {
+    if let Err(e) = tools.make_overlay(&mods_dir, &overlay_dir) {
         let _ = app.emit("apply-progress", serde_json::json!({
             "skinId": skin_id,
             "phase": "error",
             "message": e,
         }));
-        return Ok(OpResult { ok: false, message: format!("WAD injection failed: {}", e) });
+        return Ok(OpResult { ok: false, message: format!("mkoverlay failed: {}", e) });
     }
 
-    // 9. Update state (only if not dry_run, since dry_run didn't actually apply anything)
-    if !settings.dry_run {
-        let mut state = load_state(&app);
-        state.applied_skins.insert(champion_id.clone(), skin_id.clone());
-        save_state_inner(&app, &state);
-    }
+    // 9. Spawn ltk_patcher_host.exe with the line-protocol config + start scan.
+    //    The patcher stays running, scanning for the game. When the game starts,
+    //    it hooks file-reads and serves the overlay. When the game exits, the
+    //    patcher exits too.
+    let _ = app.emit("apply-progress", serde_json::json!({
+        "skinId": skin_id,
+        "phase": "starting-patcher",
+    }));
+
+    let _patcher_child = match tools.start_patcher(&overlay_dir) {
+        Ok(c) => c, // the Child is intentionally dropped — the patcher runs detached
+        Err(e) => {
+            let _ = app.emit("apply-progress", serde_json::json!({
+                "skinId": skin_id,
+                "phase": "error",
+                "message": e,
+            }));
+            return Ok(OpResult { ok: false, message: format!("Failed to start LTK patcher: {}", e) });
+        }
+    };
+    // Note: dropping the Child without .kill() means the patcher process
+    // is detached — it keeps running until either the game exits (the
+    // patcher self-exits) or the user kills it via Task Manager. This is
+    // the same behavior as Rose.
+
+    // 10. Update state.
+    let mut state = load_state(&app);
+    state.applied_skins.insert(champion_id.clone(), skin_id.clone());
+    save_state_inner(&app, &state);
 
     let _ = app.emit("apply-progress", serde_json::json!({
         "skinId": skin_id,
@@ -616,13 +605,10 @@ async fn apply_skin(
         "percent": 100,
     }));
 
-    let message = if settings.dry_run {
-        "Skin downloaded and extracted (dry-run mode — WAD files not modified). Toggle off Dry Run in Settings to apply for real.".to_string()
-    } else {
-        "Skin applied. Launch League of Legends to see it in-game.".to_string()
-    };
-
-    Ok(OpResult { ok: true, message })
+    Ok(OpResult {
+        ok: true,
+        message: "Skin applied. Launch League of Legends — the patcher will hook the game on launch and serve the overlay. The patcher self-exits when the game closes.".into(),
+    })
 }
 
 // ──────────────────────────── uninstall_skin ────────────────────────────

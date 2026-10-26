@@ -190,10 +190,25 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-label">Tools directory</div>
+          <div class="settings-help">
+            Where Veil looks for the four required binaries:
+            <code>ltk_patcher_host.exe</code>, <code>ltk_patcher_dll.dll</code>,
+            <code>mod-tools.exe</code>, <code>cslol-dll.dll</code>.
+            <br/><br/>
+            <b>Install LTK Manager</b> (provides ltk_patcher_*) from <a href="https://github.com/LeagueToolkit/ltk-manager/releases" target="_blank">github.com/LeagueToolkit/ltk-manager/releases</a> — install it, then either let Veil auto-detect it or paste the install path below.
+            <br/><br/>
+            <b>mod-tools.exe</b> is bundled with Veil. <b>cslol-dll.dll</b> can be compiled from <code>cslol_stub.c</code> (in Veil's resources) or copied from a Rose install.
+          </div>
+          <input id="settings-tools-dir" type="text" class="text-input" placeholder="Auto-detect (leave empty)" style="margin-top: 10px;" />
+        </div>
+
+        <div class="settings-section">
           <div class="settings-label">Dry Run mode</div>
           <div class="settings-help">
-            When OFF (default), Apply downloads the .fantome, remaps its chunk paths to override the champion's default skin (skin0), and writes the new chunk bytes into the WAD file. A <code>.bak</code> backup of the original WAD is created first — use Restore All to recover if anything goes wrong.<br/><br/>
-            When ON, Apply runs the full pipeline except the actual WAD write — useful for verifying the download/extraction steps without touching game files.
+            When OFF (default), Apply downloads the .fantome, extracts it, runs mod-tools.exe mkoverlay, and spawns ltk_patcher_host.exe which hooks the game on launch. <b>This is the only mode that actually applies skins.</b>
+            <br/><br/>
+            When ON, Apply skips the ltk_patcher step entirely and falls back to native WAD file modification (experimental, doesn't work against current LoL patches due to ECDSA signature validation).
           </div>
           <label class="toggle">
             <input id="settings-dry-run-toggle" type="checkbox" />
