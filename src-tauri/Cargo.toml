@@ -19,6 +19,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Tokio is already in Tauri's dependency tree; declaring it directly here
+# gives us access to `tokio::time::sleep` for the mocked async latencies
+# in commands (replace with `reqwest`-driven real I/O later).
+tokio = { version = "1", features = ["time"] }
 
 # Keep the binary small — strip symbols in release.
 [profile.release]

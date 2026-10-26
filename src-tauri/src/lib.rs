@@ -28,7 +28,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::async_runtime;
 
 mod skin_data;
 
@@ -69,7 +68,7 @@ pub struct OpResult {
 /// then resolve the LoL Game directory from there.
 #[tauri::command]
 async fn get_lol_path() -> Result<String, String> {
-    async_runtime::sleep(Duration::from_millis(600)).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
     // TODO: real detection. Try:
     //   - HKLM\SOFTWARE\Riot Games\League of Legends (InstallPath)
     //   - Common paths: C:\Riot Games\League of Legends\
@@ -80,7 +79,7 @@ async fn get_lol_path() -> Result<String, String> {
 /// Returns the catalog of champions + skins shown in the launcher.
 #[tauri::command]
 async fn get_champions() -> Result<Vec<Champion>, String> {
-    async_runtime::sleep(Duration::from_millis(120)).await;
+    tokio::time::sleep(Duration::from_millis(120)).await;
     Ok(skin_data::champions())
 }
 
@@ -101,7 +100,7 @@ async fn get_champions() -> Result<Vec<Champion>, String> {
 /// (e.g. `103015` for K/DA Ahri).
 #[tauri::command]
 async fn install_skin(skin_id: String, download_url: String) -> Result<OpResult, String> {
-    async_runtime::sleep(Duration::from_millis(700)).await;
+    tokio::time::sleep(Duration::from_millis(700)).await;
     let _ = (&skin_id, &download_url);
     Ok(OpResult {
         ok: true,
@@ -113,7 +112,7 @@ async fn install_skin(skin_id: String, download_url: String) -> Result<OpResult,
 /// from its .bak backup.
 #[tauri::command]
 async fn uninstall_skin(skin_id: String) -> Result<OpResult, String> {
-    async_runtime::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     // TODO: implement real uninstall (restore from .bak)
     let _ = &skin_id;
     Ok(OpResult {
@@ -126,7 +125,7 @@ async fn uninstall_skin(skin_id: String) -> Result<OpResult, String> {
 /// Useful as a panic button before a LoL patch lands.
 #[tauri::command]
 async fn restore_all() -> Result<OpResult, String> {
-    async_runtime::sleep(Duration::from_millis(1200)).await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
     // TODO: walk all .bak files in the LoL Game dir, restore each one
     Ok(OpResult {
         ok: true,
@@ -141,7 +140,7 @@ async fn restore_all() -> Result<OpResult, String> {
 ///   - Register it in the launcher's library
 #[tauri::command]
 async fn add_local_skin(file_path: String) -> Result<OpResult, String> {
-    async_runtime::sleep(Duration::from_millis(900)).await;
+    tokio::time::sleep(Duration::from_millis(900)).await;
     // TODO: parse + validate the file
     Ok(OpResult {
         ok: true,
@@ -154,7 +153,7 @@ async fn add_local_skin(file_path: String) -> Result<OpResult, String> {
 /// then run the same logic as `add_local_skin`.
 #[tauri::command]
 async fn add_url_skin(url: String) -> Result<OpResult, String> {
-    async_runtime::sleep(Duration::from_millis(1100)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     if url.contains("404") || url.is_empty() {
         return Ok(OpResult {
             ok: false,
