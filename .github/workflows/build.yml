@@ -43,14 +43,11 @@ jobs:
       # links cslol-dll.dll at load time and refuses to start without it, even
       # though the mkoverlay command (which is all we use) never calls into it.
       # The stub exports the expected function names as no-ops.
-      - name: Set up MSVC dev environment
-        uses: ilammy/msvc-dev-setup@v0
-        with:
-          arch: x64
-
       - name: Compile cslol-dll.dll stub
         shell: cmd
         run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSINSTALL=%%i
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
           cd src-tauri\resources
           cl /LD cslol_stub.c /Fe:cslol-dll.dll /link /NOLOGO
           dir cslol-dll.dll
