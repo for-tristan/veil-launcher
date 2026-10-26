@@ -450,8 +450,10 @@ async fn apply_skin(
         });
     }
 
-    // 2. Find the LoL install path (only used for reference; the LTK patcher
-    //    doesn't actually need it — it scans the system for the game itself).
+    // 2. Find the LoL install path. mod-tools.exe mkoverlay REQUIRES this
+    //    via --game:<path> — without it, mkoverlay fails with
+    //    "game.empty() -> true". The ltk_patcher_host.exe also scans for
+    //    the game itself, but mkoverlay needs the path explicitly.
     let lol_path = match effective_lol_path(&app) {
         Some(p) => p,
         None => return Ok(OpResult {
@@ -459,7 +461,7 @@ async fn apply_skin(
             message: "League of Legends is not detected. Open Settings to set the install path manually.".into(),
         }),
     };
-    let _ = lol_path; // we don't pass it to ltk_patcher; the patcher finds the game itself
+    let game_dir = PathBuf::from(&lol_path);
 
     // 3. Parse champion_id from skin_id (e.g., "Ahri_103015" → "Ahri")
     let champion_id = skin_id.split('_').next().unwrap_or("").to_string();
@@ -513,7 +515,13 @@ async fn apply_skin(
 
     // 6. Extract the .fantome to a mod folder (preserves ZIP structure).
     //    ltk_patcher's mkoverlay expects an extracted mod directory.
-    let mods_dir = config_dir(&app).join("mods").join(skin_id.replace('/', "_").replace('\\', "_"));
+    //
+    //    Layout matches Rose: mods_dir is the PARENT folder containing
+    //    mod subfolders. The mod folder name = skin_id (sanitized).
+    //    The .fantome's contents go inside mods/<skin_id>/.
+    let mods_parent = config_dir(&app).join("mods");
+    let mod_name = skin_id.replace('/', "_").replace('\\', "_");
+    let mods_dir = mods_parent.join(&mod_name);
     // Clear any previous extraction of this skin (in case the .fantome
     // contents changed since last apply).
     let _ = std::fs::remove_dir_all(&mods_dir);
@@ -549,8 +557,12 @@ async fn apply_skin(
         }
     };
 
-    // 8. Run mod-tools.exe mkoverlay <mods_dir> <overlay_dir>
-    let overlay_dir = config_dir(&app).join("overlay").join(skin_id.replace('/', "_").replace('\\', "_"));
+    // 8. Run mod-tools.exe mkoverlay <mods_parent> <overlay_dir>
+    //    --game:<game_dir> --mods:<mod_name> --noTFT --ignoreConflict
+    //
+    //    This mirrors Rose's exact command construction (overlay_manager.py#L283):
+    //    https://github.com/Alban1911/Rose
+    let overlay_dir = config_dir(&app).join("overlay");
     let _ = std::fs::remove_dir_all(&overlay_dir);
     let _ = std::fs::create_dir_all(&overlay_dir.parent().unwrap_or(&overlay_dir));
 
@@ -559,7 +571,7 @@ async fn apply_skin(
         "phase": "creating-overlay",
     }));
 
-    if let Err(e) = tools.make_overlay(&mods_dir, &overlay_dir) {
+    if let Err(e) = tools.make_overlay(&mods_parent, &overlay_dir, &game_dir, &mod_name) {
         let _ = app.emit("apply-progress", serde_json::json!({
             "skinId": skin_id,
             "phase": "error",

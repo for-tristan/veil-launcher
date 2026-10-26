@@ -189,13 +189,30 @@ impl LtkTools {
         })
     }
 
-    /// Run `mod-tools.exe mkoverlay <mods_dir> <overlay_dir>` to create
-    /// the overlay file from the extracted .fantome mod directory.
-    pub fn make_overlay(&self, mods_dir: &Path, overlay_dir: &Path) -> Result<(), String> {
+    /// Run `mod-tools.exe mkoverlay <mods_dir> <overlay_dir> --game:<game_dir>
+    /// --mods:<mod_name> --noTFT --ignoreConflict` to create the overlay file
+    /// from the extracted .fantome mod directory.
+    ///
+    /// Matches Rose's exact command construction (see Rose's overlay_manager.py
+    /// line 283): https://github.com/Alban1911/Rose
+    pub fn make_overlay(
+        &self,
+        mods_dir: &Path,        // PARENT folder containing mod subfolders
+        overlay_dir: &Path,     // where the overlay file gets written
+        game_dir: &Path,        // LoL install path (Game/ subfolder)
+        mod_name: &str,        // the mod subfolder name inside mods_dir
+    ) -> Result<(), String> {
+        let game_arg = format!("--game:{}", game_dir.display());
+        let mods_arg = format!("--mods:{}", mod_name);
+
         let output = Command::new(&self.mod_tools_exe)
             .arg("mkoverlay")
             .arg(mods_dir)
             .arg(overlay_dir)
+            .arg(&game_arg)
+            .arg(&mods_arg)
+            .arg("--noTFT")
+            .arg("--ignoreConflict")
             .output()
             .map_err(|e| format!("Failed to spawn mod-tools.exe: {}", e))?;
 
