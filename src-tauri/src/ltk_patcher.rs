@@ -236,23 +236,41 @@ impl LtkTools {
     /// it hooks file-reads and serves the overlay. When the game exits, the
     /// patcher exits too.
     ///
-    /// stdout/stderr use Stdio::null() — we don't read patcher status events
-    /// (Rose does via a separate thread, but for simplicity Veil just lets
-    /// them go to /dev/null). Using Stdio::piped() without a reader thread
-    /// would block the patcher when its stdout buffer fills up.
+    /// stdout is redirected to a log file at %APPDATA%\com.veil.launcher\
+    /// patcher.log so we can see the patcher's status events (config errors,
+    /// scan progress, hook success/failure, etc.). Without this, debugging
+    /// "skin doesn't apply in-game" is impossible — the patcher's output
+    /// just goes to /dev/null.
+    ///
+    /// stderr also goes to the log file (so error messages are captured).
     ///
     /// stdin is Stdio::piped() so we can send the config + start scan
     /// commands. The caller (apply_skin) stores the Child in Tauri state
     /// (PatcherState) so stdin stays open — otherwise dropping the Child
     /// closes stdin → the patcher sees EOF → it exits before hooking.
-    pub fn start_patcher(&self, overlay_dir: &Path) -> Result<Child, String> {
+    pub fn start_patcher(&self, overlay_dir: &Path, app: &AppHandle) -> Result<Child, String> {
+        use tauri::Manager;
         let prefix = format!("{}\\",
             overlay_dir.to_string_lossy().trim_end_matches('\\').trim_end_matches('/'));
 
+        // Create a log file for the patcher's stdout/stderr. Truncate on
+        // each start (so the log only contains the most recent patcher
+        // session's output).
+        let log_path = app.path().app_config_dir()
+            .map(|d| d.join("patcher.log"))
+            .unwrap_or_else(|| PathBuf::from("patcher.log"));
+        let _ = std::fs::create_dir_all(log_path.parent().unwrap_or(&log_path));
+        let log_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&log_path)
+            .map_err(|e| format!("Failed to create patcher log at {}: {}", log_path.display(), e))?;
+
         let mut child = Command::new(&self.patcher_host)
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(log_file.try_clone().unwrap()))
+            .stderr(Stdio::from(log_file))
             .spawn()
             .map_err(|e| format!("Failed to spawn patcher_host.exe: {}", e))?;
 

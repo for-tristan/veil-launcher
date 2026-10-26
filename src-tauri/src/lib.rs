@@ -601,8 +601,11 @@ async fn apply_skin(
     //    This mirrors Rose's exact command construction (overlay_manager.py#L283):
     //    https://github.com/Alban1911/Rose
     let overlay_dir = config_dir(&app).join("overlay");
+    // Clear any previous overlay + ensure the folder exists (mod-tools.exe
+    // expects the destination to be writable; it creates subfiles but the
+    // parent must exist).
     let _ = std::fs::remove_dir_all(&overlay_dir);
-    let _ = std::fs::create_dir_all(&overlay_dir.parent().unwrap_or(&overlay_dir));
+    let _ = std::fs::create_dir_all(&overlay_dir);
 
     let _ = app.emit("apply-progress", serde_json::json!({
         "skinId": skin_id,
@@ -627,7 +630,7 @@ async fn apply_skin(
         "phase": "starting-patcher",
     }));
 
-    let patcher_child = match tools.start_patcher(&overlay_dir) {
+    let patcher_child = match tools.start_patcher(&overlay_dir, &app) {
         Ok(c) => c,
         Err(e) => {
             let _ = app.emit("apply-progress", serde_json::json!({
