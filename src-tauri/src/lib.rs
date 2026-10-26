@@ -99,6 +99,19 @@ fn state_path(app: &AppHandle) -> PathBuf {
     config_dir(app).join("state.json")
 }
 
+/// Persistent cache directory for downloaded .fantome files. Lives at
+/// `%APPDATA%\com.veil.launcher\cache\` on Windows. Each .fantome is
+/// saved as `<skin_id>.fantome` so re-applying a skin doesn't re-download
+/// the file from the LeagueSkins repo every time.
+fn cache_dir(app: &AppHandle) -> PathBuf {
+    config_dir(app).join("cache")
+}
+
+fn fantome_cache_path(app: &AppHandle, skin_id: &str) -> PathBuf {
+    let safe_name = skin_id.replace('/', "_").replace('\\', "_");
+    cache_dir(app).join(format!("{}.fantome", safe_name))
+}
+
 fn load_settings(app: &AppHandle) -> Settings {
     let path = settings_path(app);
     if path.exists() {
@@ -515,32 +528,46 @@ async fn apply_skin(
         }
     }
 
-    // 5. Download the .fantome with progress
-    let temp_dir = std::env::temp_dir().join("veil-launcher");
-    let _ = tokio::fs::create_dir_all(&temp_dir).await;
-    let safe_name = skin_id.replace('/', "_").replace('\\', "_");
-    let file_path = temp_dir.join(format!("{}.fantome", safe_name));
+    // 5. Resolve the cached .fantome path. If the file is already cached
+    //    (from a previous Apply), skip the download. Otherwise download
+    //    with progress + persist to the cache.
+    let _ = std::fs::create_dir_all(cache_dir(&app));
+    let cached_path = fantome_cache_path(&app, &skin_id);
+
+    let cache_hit = cached_path.exists()
+        && cached_path.metadata()
+            .map(|m| m.len() > 0)
+            .unwrap_or(false);
 
     let _ = app.emit("apply-progress", serde_json::json!({
         "skinId": skin_id,
-        "phase": "downloading",
-        "percent": 0,
+        "phase": if cache_hit { "cached" } else { "downloading" },
+        "percent": if cache_hit { 100 } else { 0 },
+        "message": if cache_hit {
+            "Using cached .fantome (no re-download needed)".to_string()
+        } else {
+            "Downloading .fantome from Alban1911/LeagueSkins".to_string()
+        },
     }));
 
-    if let Err(e) = download_with_progress(&download_url, &file_path, &app, &skin_id).await {
-        return Ok(OpResult { ok: false, message: format!("Download failed: {}", e) });
+    if !cache_hit {
+        if let Err(e) = download_with_progress(&download_url, &cached_path, &app, &skin_id).await {
+            return Ok(OpResult { ok: false, message: format!("Download failed: {}", e) });
+        }
     }
 
-    // 6. Extract .fantome
+    // 6. Extract the .fantome (always from the cache path).
     let _ = app.emit("apply-progress", serde_json::json!({
         "skinId": skin_id,
         "phase": "extracting",
     }));
 
-    let manifest = match extract_fantome(&file_path) {
+    let manifest = match extract_fantome(&cached_path) {
         Ok(m) => m,
         Err(e) => {
-            let _ = tokio::fs::remove_file(&file_path).await;
+            // The cached file might be corrupt — delete it so the next
+            // Apply re-downloads a fresh copy.
+            let _ = std::fs::remove_file(&cached_path);
             return Ok(OpResult { ok: false, message: e });
         }
     };
@@ -564,8 +591,8 @@ async fn apply_skin(
         &skin_id,
     ).await;
 
-    // 8. Cleanup temp file
-    let _ = tokio::fs::remove_file(&file_path).await;
+    // 8. Note: the cached .fantome file is NOT deleted — it stays in the
+    //    cache so re-applying this skin doesn't re-download.
 
     if let Err(e) = inject_result {
         let _ = app.emit("apply-progress", serde_json::json!({

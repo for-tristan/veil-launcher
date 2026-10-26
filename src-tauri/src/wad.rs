@@ -1,39 +1,53 @@
 // wad.rs — Real WAD chunk injection for League of Legends.
 //
-// FORMAT BACKGROUND:
-//   WAD files are Riot's custom ZIP-like archive. Structure:
-//     [ header (28 bytes for v3) ]
-//     [ TOC entries (24 bytes each, sorted by hash) ]
-//     [ chunk data section ]
+// FORMAT (per https://www.communitydragon.org/docs/wad):
 //
-//   Each TOC entry: { hash: u64, offset: u64, compressed_size: u32, uncompressed_size: u32 }
-//   The hash = xxhash64 of the chunk's logical lowercase path (seed=0).
+//   WAD header (4 bytes):
+//     bytes 0-1: "RW" magic
+//     byte 2:   major version (3)
+//     byte 3:   minor version (0-4+)
+//
+//   Directory header (268 bytes, immediately after WAD header):
+//     bytes 0-255   (file bytes 4-259):   256-byte ECDSA signature
+//     bytes 256-263 (file bytes 260-267): 8-byte header checksum
+//                                         (xxhash64 of entry headers
+//                                          sorted by data offset)
+//     bytes 264-267 (file bytes 268-271): u32 LE entry count (EC)
+//
+//   Total header size = 4 + 268 = 272 bytes.
+//
+//   TOC entries (32 bytes each, immediately after header at byte 272):
+//     bytes 0-7:   u64 LE path hash (xxhash64 of chunk path with seed=0)
+//     bytes 8-11:  u32 LE data offset (offset from start of file)
+//     bytes 12-15: u32 LE compressed size (size on disk)
+//     bytes 16-19: u32 LE uncompressed size (size in memory)
+//     byte 20:     high 4 bits = data type (0=raw, 1=gzip, 2=redirect,
+//                  3=zstd, 4=zstd-subchunks), low 4 bits = subchunk count
+//     byte 21:     for v3.4+: high byte of first_subchunk_idx
+//                  (was: bool duplicate flag in older versions)
+//     bytes 22-23: u16 LE low 2 bytes of first_subchunk_idx
+//     bytes 24-31: 8-byte entry checksum (xxhash64 of chunk data)
 //
 // INJECTION STRATEGY:
-//   1. Backup the WAD to <wad>.wad.client.bak (always — never overwrite an
-//      existing .bak, since that represents the pristine pre-mod state).
-//   2. Parse the header + TOC.
-//   3. For each manifest entry from the .fantome:
-//        - Remap the chunk path from skinN (e.g. skin15) to skin0, so the
-//          applied skin's assets OVERRIDE the champion's default skin
-//          slot. This is what makes Veil work — applying K/DA Ahri shows
-//          K/DA visuals when you pick Classic Ahri in champ select.
-//        - Compute xxhash64 of the remapped path.
+//   1. Backup the WAD to <wad>.wad.client.bak (always).
+//   2. Read the 272-byte header + TOC entries.
+//   3. For each .fantome manifest entry:
+//        - Remap the chunk path: replace "skin<digits>" with "skin0"
+//          so the modded asset OVERRIDES the champion's default skin slot
+//          (this is what makes the skin show when picking Classic in
+//          champ select).
+//        - Compute xxhash64 of the remapped path (seed=0).
 //        - Find the matching TOC entry by hash.
-//        - Append the new chunk data at the end of the file (offsets grow).
-//        - Update the TOC entry's offset + size fields.
-//   4. Flush.
-//
-// SAFETY:
-//   - The .bak file is created BEFORE any modification, so any failure
-//     leaves the WAD recoverable via Restore All in Settings.
-//   - We never overwrite the existing chunk data — we append new data
-//     at EOF and just update the TOC entry to point at the new location.
-//     This means the original chunk bytes are still in the file (wasted
-//     space) but the WAD will read the new chunk at the new offset.
-//   - We use a single atomic operation: read TOC, append data, write TOC.
-//     If the write fails partway, the TOC might be inconsistent, but the
-//     .bak file is untouched.
+//        - Append the new chunk data at the end of the file.
+//        - Update the TOC entry: offset = new EOF position,
+//          comp_size = uncomp_size = data.len(), type = 0 (uncompressed),
+//          subchunks = 0, first_subchunk_idx = 0.
+//   4. Compute the new header checksum (xxhash64 of all entries sorted
+//      by offset) and write it to bytes 260-267. This is required for
+//      the LoL client to accept the modified WAD.
+//   5. Compute the new entry checksum for each modified entry (xxhash64
+//      of the chunk data) and write it to bytes 24-31 of the entry.
+//   6. Flush + sync_data to hit disk.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -41,62 +55,33 @@ use tauri::{AppHandle, Emitter};
 use xxhash_rust::xxh64::xxh64;
 
 const WAD_MAGIC: [u8; 2] = *b"RW";
-const WAD_HEADER_SIZE: u64 = 28;
-const WAD_TOC_ENTRY_SIZE: u64 = 24;
-
-struct WadHeader {
-    #[allow(dead_code)]
-    major: u8,
-    #[allow(dead_code)]
-    minor: u8,
-    entry_count: u32,
-}
-
-#[derive(Clone)]
-struct WadTocEntry {
-    hash: u64,
-    offset: u64,
-    compressed_size: u32,
-    uncompressed_size: u32,
-}
+const WAD_HEADER_SIZE: u64 = 272;
+const WAD_TOC_ENTRY_SIZE: usize = 32;
+const HEADER_CHECKSUM_OFFSET: u64 = 260;
+const EC_OFFSET: u64 = 268;
+const ENTRY_CHECKSUM_OFFSET: usize = 24;
 
 // ──────────────────────────── Default skin remapping ────────────────────────────
 
 /// Remap a chunk path so it targets the champion's default skin slot
-/// (skin0) instead of the original skinN slot.
-///
-/// Examples:
-///   "assets/characters/ahri/skins/skin15/ahri_skin15_tx_cm.dds"
-///     → "assets/characters/ahri/skins/skin0/ahri_skin0_tx_cm.dds"
-///   "assets/characters/ahri/skins/skin15/base/ahri_skin15.skn"
-///     → "assets/characters/ahri/skins/skin0/base/ahri_skin0.skn"
-///   "assets/maps/turrets/items.wad" (no skinN token)
-///     → unchanged
-///
-/// This is what makes Veil's applied skins override the DEFAULT skin
-/// shown in champion select. Without this remap, applying K/DA Ahri
-/// would only change the visuals when you specifically pick K/DA Ahri
-/// in champ select — but you don't own that skin, so you can't.
+/// (skin0) instead of the original skinN slot. This is what makes Veil's
+/// applied skins OVERRIDE the DEFAULT skin shown in champion select.
 fn remap_to_default_skin(path: &str) -> String {
     let bytes = path.as_bytes();
     let mut result = String::with_capacity(path.len() + 8);
     let mut i = 0usize;
     while i < bytes.len() {
-        // Look for "skin" prefix
         if i + 4 <= bytes.len() && &bytes[i..i + 4] == b"skin" {
-            // Consume any following digits
             let mut j = i + 4;
             while j < bytes.len() && bytes[j].is_ascii_digit() {
                 j += 1;
             }
-            // If we found at least one digit, replace with "skin0"
             if j > i + 4 {
                 result.push_str("skin0");
                 i = j;
                 continue;
             }
         }
-        // Paths in WADs are ASCII lowercase, so byte-push is safe
         result.push(bytes[i] as char);
         i += 1;
     }
@@ -169,7 +154,7 @@ pub async fn apply_manifest(
     Ok(())
 }
 
-// ──────────────────────────── inject_into_wad (REAL) ────────────────────────────
+// ──────────────────────────── inject_into_wad (REAL, correct format) ────────────────────────────
 
 fn inject_into_wad(
     wad_path: &Path,
@@ -177,27 +162,24 @@ fn inject_into_wad(
     app: &AppHandle,
     skin_id: &str,
 ) -> Result<(), String> {
-    // 1. ALWAYS back up the WAD first. Never overwrite an existing .bak
-    //    (it represents the pristine pre-mod state — if we overwrote it
-    //    with a partially-modded WAD, Restore All would no longer recover
-    //    the original).
+    // 1. ALWAYS back up the WAD first.
     let bak_path = build_bak_path(wad_path);
     if !bak_path.exists() {
         std::fs::copy(wad_path, &bak_path)
             .map_err(|e| format!("Failed to back up {}: {}", wad_path.display(), e))?;
     }
 
-    // 2. Open the WAD for read+write (binary mode).
+    // 2. Open the WAD for read+write.
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(wad_path)
         .map_err(|e| format!("Failed to open WAD {}: {}", wad_path.display(), e))?;
 
-    // 3. Parse header.
+    // 3. Parse the 272-byte header.
     let header = parse_wad_header(&mut file)?;
 
-    // 4. Read the TOC.
+    // 4. Read the TOC entries (32 bytes each, starting at byte 272).
     file.seek(SeekFrom::Start(WAD_HEADER_SIZE))
         .map_err(|e| format!("Failed to seek to TOC: {}", e))?;
 
@@ -211,11 +193,11 @@ fn inject_into_wad(
         .map_err(|e| format!("Failed to read WAD metadata: {}", e))?
         .len();
 
-    // 6. For each manifest entry: remap to default skin, compute hash, find
-    //    matching TOC entry, prepare the new chunk data to append.
+    // 6. For each manifest entry: remap path, compute hash, find matching
+    //    TOC entry, prepare new chunk data + TOC entry update.
     let mut appended_data: Vec<u8> = Vec::new();
-    // List of (toc_index, new_offset, new_compressed_size, new_uncompressed_size)
-    let mut toc_updates: Vec<(usize, u64, u32, u32)> = Vec::new();
+    let mut toc_updates: Vec<(usize, Vec<u8>)> = Vec::new();
+    // (toc_index, new 32-byte entry bytes)
     let mut injected_count = 0usize;
     let mut skipped_count = 0usize;
 
@@ -231,20 +213,32 @@ fn inject_into_wad(
             "dataSize": entry.data.len(),
         }));
 
-        let matching_idx = toc.iter().position(|e| e.hash == hash);
+        let matching_idx = toc.iter().position(|e| e.path_hash == hash);
         match matching_idx {
             Some(idx) => {
                 let offset_in_appended = appended_data.len() as u64;
                 appended_data.extend_from_slice(&entry.data);
                 let new_offset = original_eof + offset_in_appended;
                 let new_size = entry.data.len() as u32;
-                toc_updates.push((idx, new_offset, new_size, new_size));
+
+                // Compute the entry checksum (xxhash64 of chunk data, seed=0).
+                let entry_checksum = xxh64(&entry.data, 0);
+
+                // Build the new 32-byte TOC entry.
+                let mut new_entry_bytes = [0u8; WAD_TOC_ENTRY_SIZE];
+                new_entry_bytes[0..8].copy_from_slice(&hash.to_le_bytes());
+                new_entry_bytes[8..12].copy_from_slice(&new_offset.to_le_bytes());
+                new_entry_bytes[12..16].copy_from_slice(&new_size.to_le_bytes());        // comp_size
+                new_entry_bytes[16..20].copy_from_slice(&new_size.to_le_bytes());        // uncomp_size
+                new_entry_bytes[20] = 0;                                                  // type=0 (uncompressed) | subchunks=0
+                new_entry_bytes[21] = 0;                                                  // high byte of first_subchunk_idx (v3.4+)
+                new_entry_bytes[22..24].copy_from_slice(&0u16.to_le_bytes());            // low 2 bytes of first_subchunk_idx
+                new_entry_bytes[24..32].copy_from_slice(&entry_checksum.to_le_bytes()); // entry checksum
+
+                toc_updates.push((idx, new_entry_bytes.to_vec()));
                 injected_count += 1;
             }
             None => {
-                // No matching chunk in this WAD — the path likely belongs
-                // to a different WAD. Safe to skip; another call to
-                // apply_manifest for a different WAD will handle it.
                 skipped_count += 1;
             }
         }
@@ -261,31 +255,75 @@ fn inject_into_wad(
         ));
     }
 
-    // 7. Append the new chunk data at the end of the file.
+    // 7. Append the new chunk data at EOF.
     file.seek(SeekFrom::End(0))
         .map_err(|e| format!("Failed to seek to end: {}", e))?;
     file.write_all(&appended_data)
         .map_err(|e| format!("Failed to write new chunk data: {}", e))?;
 
-    // 8. Update the TOC entries to point at the new offsets + sizes.
-    for (toc_idx, new_offset, new_compressed_size, new_uncompressed_size) in &toc_updates {
-        let toc_offset = WAD_HEADER_SIZE + (*toc_idx as u64) * WAD_TOC_ENTRY_SIZE;
-        // Skip the 8-byte hash field, write the offset + sizes.
-        file.seek(SeekFrom::Start(toc_offset + 8))
+    // 8. Write the updated TOC entries back to the file (each at its
+    //    original TOC offset, NOT at the new chunk data location).
+    for (toc_idx, new_entry_bytes) in &toc_updates {
+        let toc_offset = WAD_HEADER_SIZE + (*toc_idx as u64) * (WAD_TOC_ENTRY_SIZE as u64);
+        file.seek(SeekFrom::Start(toc_offset))
             .map_err(|e| format!("Failed to seek to TOC entry {}: {}", toc_idx, e))?;
-        file.write_all(&new_offset.to_le_bytes())
-            .map_err(|e| format!("Failed to write new offset: {}", e))?;
-        file.write_all(&new_compressed_size.to_le_bytes())
-            .map_err(|e| format!("Failed to write compressed size: {}", e))?;
-        file.write_all(&new_uncompressed_size.to_le_bytes())
-            .map_err(|e| format!("Failed to write uncompressed size: {}", e))?;
+        file.write_all(new_entry_bytes)
+            .map_err(|e| format!("Failed to write TOC entry {}: {}", toc_idx, e))?;
     }
 
-    // 9. Flush to disk.
-    file.flush()
-        .map_err(|e| format!("Failed to flush WAD: {}", e))?;
-    // On Windows, also fsync to make sure the write hits the disk before
-    // the game client reads it.
+    // 9. Recompute the header checksum (xxhash64 of all entries sorted by
+    //    data offset) and write it to bytes 260-267.
+    let mut updated_toc = toc.clone();
+    for (toc_idx, new_entry_bytes) in &toc_updates {
+        if let Some(existing) = updated_toc.get_mut(*toc_idx) {
+            // Update the in-memory TOC entry to reflect the new state so
+            // the checksum computation matches what's now on disk.
+            existing.data_offset = u32::from_le_bytes(
+                new_entry_bytes[8..12].try_into().unwrap()
+            );
+            existing.compressed_size = u32::from_le_bytes(
+                new_entry_bytes[12..16].try_into().unwrap()
+            );
+            existing.uncompressed_size = u32::from_le_bytes(
+                new_entry_bytes[16..20].try_into().unwrap()
+            );
+        }
+    }
+    let mut sorted_for_checksum = updated_toc.clone();
+    sorted_for_checksum.sort_by_key(|e| e.data_offset);
+
+    // Build the concatenated bytes of all entries sorted by offset.
+    let mut hasher_bytes: Vec<u8> = Vec::with_capacity(toc.len() * WAD_TOC_ENTRY_SIZE);
+    for entry in &sorted_for_checksum {
+        // Read the entry's current bytes from the file (since some fields
+        // like the path_hash and checksum aren't in our in-memory struct).
+        let toc_offset = WAD_HEADER_SIZE
+            + (toc.iter().position(|e| std::ptr::eq(e, entry)).unwrap_or(0) as u64)
+            * (WAD_TOC_ENTRY_SIZE as u64);
+        // Actually simpler: just read each entry fresh from disk in
+        // sorted-by-offset order.
+        let _ = toc_offset; // unused in this version
+    }
+    // Re-read each entry's 32 bytes from disk in sorted-by-offset order.
+    let mut indices: Vec<usize> = (0..toc.len()).collect();
+    indices.sort_by_key(|&i| updated_toc[i].data_offset);
+    for idx in &indices {
+        let toc_offset = WAD_HEADER_SIZE + (*idx as u64) * (WAD_TOC_ENTRY_SIZE as u64);
+        file.seek(SeekFrom::Start(toc_offset))
+            .map_err(|e| format!("Failed to seek to TOC entry {}: {}", idx, e))?;
+        let mut entry_buf = [0u8; WAD_TOC_ENTRY_SIZE];
+        file.read_exact(&mut entry_buf)
+            .map_err(|e| format!("Failed to read TOC entry {}: {}", idx, e))?;
+        hasher_bytes.extend_from_slice(&entry_buf);
+    }
+    let header_checksum = xxh64(&hasher_bytes, 0);
+    file.seek(SeekFrom::Start(HEADER_CHECKSUM_OFFSET))
+        .map_err(|e| format!("Failed to seek to header checksum: {}", e))?;
+    file.write_all(&header_checksum.to_le_bytes())
+        .map_err(|e| format!("Failed to write header checksum: {}", e))?;
+
+    // 10. Flush + sync_data.
+    file.flush().map_err(|e| format!("Failed to flush WAD: {}", e))?;
     let _ = file.sync_data();
 
     let _ = app.emit("apply-progress", serde_json::json!({
@@ -297,6 +335,24 @@ fn inject_into_wad(
     }));
 
     Ok(())
+}
+
+struct WadHeader {
+    #[allow(dead_code)]
+    major: u8,
+    #[allow(dead_code)]
+    minor: u8,
+    entry_count: u32,
+}
+
+#[derive(Clone)]
+struct WadTocEntry {
+    path_hash: u64,
+    data_offset: u32,
+    #[allow(dead_code)]
+    compressed_size: u32,
+    #[allow(dead_code)]
+    uncompressed_size: u32,
 }
 
 fn parse_wad_header(file: &mut std::fs::File) -> Result<WadHeader, String> {
@@ -317,15 +373,11 @@ fn parse_wad_header(file: &mut std::fs::File) -> Result<WadHeader, String> {
         ));
     }
 
-    // For v3, EC (entry count) is at bytes 8..12 as u32 LE.
-    // This is the commonly documented layout; if your WAD has a different
-    // layout (Riot has rev'd the format a few times), this will be wrong
-    // and the parser will fail loudly rather than silently corrupting.
-    let entry_count = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    // EC at file bytes 268-271 as u32 LE (CommunityDragon spec).
+    let entry_count = u32::from_le_bytes([buf[268], buf[269], buf[270], buf[271]]);
 
-    // Sanity check: entry_count should be reasonable (< 1 million).
-    // A WAD with more than 1M entries is almost certainly misparsed.
-    if entry_count > 1_000_000 {
+    // Sanity check.
+    if entry_count > 5_000_000 {
         return Err(format!(
             "Implausible entry count {} — header layout may have changed",
             entry_count
@@ -336,31 +388,24 @@ fn parse_wad_header(file: &mut std::fs::File) -> Result<WadHeader, String> {
 }
 
 fn read_toc_entry(file: &mut std::fs::File) -> Result<WadTocEntry, String> {
-    let mut buf = [0u8; WAD_TOC_ENTRY_SIZE as usize];
+    let mut buf = [0u8; WAD_TOC_ENTRY_SIZE];
     file.read_exact(&mut buf)
         .map_err(|e| format!("Failed to read TOC entry: {}", e))?;
 
-    let hash = u64::from_le_bytes([
-        buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-    ]);
-    let offset = u64::from_le_bytes([
-        buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
-    ]);
-    let compressed_size = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
-    let uncompressed_size = u32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    let path_hash = u64::from_le_bytes(buf[0..8].try_into().unwrap());
+    let data_offset = u32::from_le_bytes(buf[8..12].try_into().unwrap());
+    let compressed_size = u32::from_le_bytes(buf[12..16].try_into().unwrap());
+    let uncompressed_size = u32::from_le_bytes(buf[16..20].try_into().unwrap());
 
     Ok(WadTocEntry {
-        hash,
-        offset,
+        path_hash,
+        data_offset,
         compressed_size,
         uncompressed_size,
     })
 }
 
-/// Build the .bak path next to a WAD file.
-/// For "Ahri.wad.client" → "Ahri.wad.client.bak"
 fn build_bak_path(wad_path: &Path) -> PathBuf {
-    // Use the full file name + ".bak"
     let mut name = wad_path.file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();

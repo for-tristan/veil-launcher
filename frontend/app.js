@@ -355,6 +355,8 @@
     progress.hidden = false;
 
     const phaseLabels = {
+      starting: "Starting…",
+      cached: "Using cache",
       downloading: "Downloading",
       downloaded: "Downloaded",
       extracting: "Extracting",
@@ -363,6 +365,7 @@
         ? `Injecting (${current}/${total})`
         : "Injecting",
       "injecting-pending": "Queued for injection",
+      injected: "Injected",
       done: "Done",
       error: "Error",
     };
