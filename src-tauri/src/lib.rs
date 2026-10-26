@@ -141,11 +141,11 @@ fn save_state_inner(app: &AppHandle, state: &AppState) {
 /// game holds memory-mapped views over the WAD files — writing to
 /// them mid-match can corrupt the match or crash the game.
 fn is_league_running_sync() -> bool {
-    use sysinfo::{ProcessRefreshKind, System};
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
     let mut sys = System::new();
     sys.refresh_processes_specifics(
-        None,
+        ProcessesToUpdate::All,
         true,
         ProcessRefreshKind::new(),
     );

@@ -200,7 +200,8 @@ pub async fn uninstall_skin_for_champion(
     // For the prototype: full restore on any uninstall. The user can
     // re-apply other skins afterward.
     let _ = champion_id; // suppress unused warning
-    restore_all_inner(game_dir).await
+    let _ = restore_all_inner(game_dir).await?;
+    Ok(())
 }
 
 // ──────────────────────────── restore_all ────────────────────────────
