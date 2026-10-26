@@ -32,6 +32,7 @@
     "resources": [
       "resources/mod-tools.exe",
       "resources/cslol_stub.c",
+      "resources/cslol-dll.dll",
       "resources/patcher_host.exe",
       "resources/patcher_dll.dll"
     ],

@@ -39,6 +39,22 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      # Compile cslol-dll.dll from the bundled cslol_stub.c source. mod-tools.exe
+      # links cslol-dll.dll at load time and refuses to start without it, even
+      # though the mkoverlay command (which is all we use) never calls into it.
+      # The stub exports the expected function names as no-ops.
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-setup@v0
+        with:
+          arch: x64
+
+      - name: Compile cslol-dll.dll stub
+        shell: cmd
+        run: |
+          cd src-tauri\resources
+          cl /LD cslol_stub.c /Fe:cslol-dll.dll /link /NOLOGO
+          dir cslol-dll.dll
+
       - name: Verify Rust build (debug)
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
