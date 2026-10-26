@@ -31,7 +31,9 @@
     "targets": ["msi", "nsis"],
     "resources": [
       "resources/mod-tools.exe",
-      "resources/cslol_stub.c"
+      "resources/cslol_stub.c",
+      "resources/patcher_host.exe",
+      "resources/patcher_dll.dll"
     ],
     "icon": [
       "icons/32x32.png",
