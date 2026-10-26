@@ -45,9 +45,9 @@ impl PatcherState {
 
     /// Replace the current patcher (if any) with a new one. The previous
     /// Child is killed + reaped to avoid orphan processes.
-    fn replace(&self, mut new_child: std::process::Child) {
+    fn replace(&self, new_child: std::process::Child) {
         let mut guard = self.child.lock().unwrap();
-        if let Some(prev) = guard.take() {
+        if let Some(mut prev) = guard.take() {
             // Try to kill the previous patcher. On Windows, killing a
             // child process tree requires the PROCESS_TERMINATE access
             // right which we have by default via spawn().
