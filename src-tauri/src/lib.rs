@@ -423,7 +423,6 @@ pub fn extract_fantome_to_dir(file_path: &std::path::Path, dest_dir: &std::path:
             }
             let mut out_file = std::fs::File::create(&out_path)
                 .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
-            use std::io::Copy;
             std::io::copy(&mut zip_file, &mut out_file)
                 .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))?;
         }
