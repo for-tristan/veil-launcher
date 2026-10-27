@@ -258,7 +258,7 @@ impl LtkTools {
         // session's output).
         let log_path = app.path().app_config_dir()
             .map(|d| d.join("patcher.log"))
-            .unwrap_or_else(|| PathBuf::from("patcher.log"));
+            .unwrap_or_else(|_| PathBuf::from("patcher.log"));
         let _ = std::fs::create_dir_all(log_path.parent().unwrap_or(&log_path));
         let log_file = std::fs::OpenOptions::new()
             .write(true)
