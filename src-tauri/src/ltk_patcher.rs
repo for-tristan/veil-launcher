@@ -268,20 +268,39 @@ impl LtkTools {
             .open(&log_path)
             .map_err(|e| format!("Failed to create patcher log at {}: {}", log_path.display(), e))?;
 
+        // CRITICAL: Set cwd to the host's parent directory. Windows LoadLibrary
+        // searches the current directory for the DLL — if cwd is wrong, the
+        // host can't find ltk_patcher_dll.dll. Rose does the same:
+        //   cwd=str(host_exe.parent)
+        let host_dir = self.patcher_host.parent()
+            .ok_or_else(|| "Could not resolve patcher_host parent directory".to_string())?;
+
         let mut child = Command::new(&self.patcher_host)
+            .current_dir(host_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::from(log_file.try_clone().unwrap()))
             .stderr(Stdio::from(log_file))
             .spawn()
             .map_err(|e| format!("Failed to spawn patcher_host.exe: {}", e))?;
 
-        // Send the line-protocol config + start commands to stdin
+        // Send the line-protocol config + start commands to stdin.
+        //
+        // CRITICAL: flags must be 4 (CSLOL_HOOK_OPT_OUT_AH_V1), not 0.
+        // Rose's overlay_manager.py line 62: LTK_PATCHER_FLAGS = 4
+        // Comment: "Flag 4 = CSLOL_HOOK_OPT_OUT_AH_V1: Rose replaces skin0
+        // with the selected skin, which the DLL's base-skin check rejects
+        // and then disables the whole 'enforce skinhack scan' setting."
+        //
+        // Without flag 4, the DLL's anti-skinhack v1 enforcement kicks in,
+        // rejecting the overlay with error VRF00000008:
+        //   "host verification failed, refusing overlay: [VRF00000008]"
+        //
+        // loglevel 16 (0x10) = Info level, matching Rose's LTK_PATCHER_LOG_LEVEL.
         if let Some(stdin) = child.stdin.as_mut() {
-            let _ = writeln!(stdin, "config loglevel 0");
-            let _ = writeln!(stdin, "config flags 0");
+            let _ = writeln!(stdin, "config loglevel 16");
+            let _ = writeln!(stdin, "config flags 4");
             let _ = writeln!(stdin, "config prefix {}", prefix);
             let _ = writeln!(stdin, "start scan");
-            // Flush to make sure commands are sent immediately.
             let _ = stdin.flush();
         }
 
