@@ -136,14 +136,15 @@ impl LtkTools {
             search_paths.push(PathBuf::from(&local_app).join("Rose").join("injection").join("tools"));
         }
 
-        // Look for Veil's renamed bundled names FIRST (patcher_host.exe +
-        // patcher_dll.dll). Fall back to the original LTK Manager names
-        // (ltk_patcher_host.exe + ltk_patcher_dll.dll) for users who have
-        // LTK Manager installed.
-        let patcher_host = find_in_paths("patcher_host.exe", &search_paths)
-            .or_else(|| find_in_paths("ltk_patcher_host.exe", &search_paths));
-        let patcher_dll = find_in_paths("patcher_dll.dll", &search_paths)
-            .or_else(|| find_in_paths("ltk_patcher_dll.dll", &search_paths));
+        // The patcher_host.exe internally loads ltk_patcher_dll.dll by its
+        // HARDCODED original name. So we MUST ship the DLL with the original
+        // filename 'ltk_patcher_dll.dll', not a renamed 'patcher_dll.dll'.
+        // Previous renaming caused 'failed to load hook dll' errors because
+        // the host couldn't find the DLL it was looking for.
+        let patcher_host = find_in_paths("ltk_patcher_host.exe", &search_paths)
+            .or_else(|| find_in_paths("patcher_host.exe", &search_paths));
+        let patcher_dll = find_in_paths("ltk_patcher_dll.dll", &search_paths)
+            .or_else(|| find_in_paths("patcher_dll.dll", &search_paths));
 
         let mod_tools_exe = find_in_paths("mod-tools.exe", &search_paths);
         let cslol_dll = find_in_paths("cslol-dll.dll", &search_paths);
@@ -157,10 +158,10 @@ impl LtkTools {
             missing.push("cslol-dll.dll (stub — see src-tauri/resources/cslol_stub.c, or copy from Rose)");
         }
         if patcher_host.is_none() {
-            missing.push("patcher_host.exe (bundled with Veil since v0.1.1; if missing, reinstall Veil)");
+            missing.push("ltk_patcher_host.exe (bundled with Veil since v0.1.1; if missing, reinstall Veil)");
         }
         if patcher_dll.is_none() {
-            missing.push("patcher_dll.dll (bundled with Veil since v0.1.1; if missing, reinstall Veil)");
+            missing.push("ltk_patcher_dll.dll (bundled with Veil since v0.1.1; if missing, reinstall Veil)");
         }
 
         if !missing.is_empty() {
@@ -172,7 +173,7 @@ impl LtkTools {
                 "Missing required tools:\n  - {}\n\n\
                  Searched paths:\n{}\n\
                  To fix:\n\
-                 - Reinstall Veil to get patcher_host.exe + patcher_dll.dll + mod-tools.exe back.\n\
+                 - Reinstall Veil to get ltk_patcher_host.exe + ltk_patcher_dll.dll + mod-tools.exe back.\n\
                  - For cslol-dll.dll, compile the bundled cslol_stub.c using MSVC:\n\
                      cl /LD cslol_stub.c /Fe:cslol-dll.dll\n\
                    (Open 'x64 Native Tools Command Prompt for VS' to get the `cl` command.)\n\
