@@ -275,11 +275,26 @@ impl LtkTools {
         let host_dir = self.patcher_host.parent()
             .ok_or_else(|| "Could not resolve patcher_host parent directory".to_string())?;
 
-        let mut child = Command::new(&self.patcher_host)
+        // CREATE_NO_WINDOW prevents a console window from flashing when the
+        // patcher starts. Rose uses the same flag:
+        //   creationflags = subprocess.CREATE_NO_WINDOW
+        #[cfg(target_os = "windows")]
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let mut command = Command::new(&self.patcher_host);
+        command
             .current_dir(host_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::from(log_file.try_clone().unwrap()))
-            .stderr(Stdio::from(log_file))
+            .stderr(Stdio::from(log_file));
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = command
             .spawn()
             .map_err(|e| format!("Failed to spawn patcher_host.exe: {}", e))?;
 
