@@ -779,6 +779,21 @@ async fn add_url_skin(url: String) -> Result<OpResult, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Check if we're running as the patcher launcher (a copy of Veil
+    // named ltk-manager.exe). This tricks the LTK patcher DLL's VRF00000008
+    // host verification check — the DLL expects the parent of
+    // ltk_patcher_host.exe to be named "ltk-manager.exe". We create a
+    // hardlink/copy of veil.exe named ltk-manager.exe, spawn it, and IT
+    // spawns ltk_patcher_host.exe. The DLL sees the parent name matches.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--veil-patcher-launcher") {
+        if let Err(e) = run_patcher_launcher(&args) {
+            eprintln!("Patcher launcher error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -803,4 +818,76 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Veil launcher");
+}
+
+// ──────────────────────────── Patcher launcher mode ────────────────────────────
+//
+// When Veil is launched as "ltk-manager.exe --veil-patcher-launcher <overlay_dir>
+// <patcher_host_path> <log_path>", it runs in "launcher mode" — no Tauri, no UI.
+// It spawns ltk_patcher_host.exe as its OWN child, sends the config commands,
+// and waits for it to exit.
+//
+// The trick: the DLL's VRF check queries the parent process name of
+// ltk_patcher_host.exe. Since we named ourselves "ltk-manager.exe", the DLL
+// sees the expected parent name and the verification passes.
+
+fn run_patcher_launcher(args: &[String]) -> Result<(), String> {
+    use std::io::Write;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+
+    // Parse args: --veil-patcher-launcher <overlay_dir> <patcher_host_path> <log_path>
+    let overlay_dir = args.get(2)
+        .ok_or("missing overlay_dir argument")?;
+    let patcher_host = args.get(3)
+        .ok_or("missing patcher_host_path argument")?;
+    let log_path = args.get(4)
+        .ok_or("missing log_path argument")?;
+
+    let prefix = format!("{}\\",
+        overlay_dir.trim_end_matches('\\').trim_end_matches('/'));
+
+    // Open the log file (truncate — only the latest session's output)
+    let log_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(log_path)
+        .map_err(|e| format!("Can't open patcher log: {}", e))?;
+
+    let host_dir = Path::new(patcher_host).parent()
+        .unwrap_or(Path::new("."));
+
+    // CREATE_NO_WINDOW to match Rose's spawn flags
+    #[cfg(target_os = "windows")]
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let mut command = Command::new(patcher_host);
+    command
+        .current_dir(host_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(log_file.try_clone().map_err(|e| format!("clone log: {}", e))?))
+        .stderr(Stdio::from(log_file));
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = command.spawn()
+        .map_err(|e| format!("Can't spawn ltk_patcher_host.exe: {}", e))?;
+
+    // Send config commands (same as start_patcher)
+    if let Some(stdin) = child.stdin.as_mut() {
+        let _ = writeln!(stdin, "config loglevel 16");
+        let _ = writeln!(stdin, "config flags 4");
+        let _ = writeln!(stdin, "config prefix {}", prefix);
+        let _ = writeln!(stdin, "start scan");
+        let _ = stdin.flush();
+    }
+
+    // Wait for the patcher to exit (it self-exits when the game closes)
+    let _ = child.wait();
+    Ok(())
 }

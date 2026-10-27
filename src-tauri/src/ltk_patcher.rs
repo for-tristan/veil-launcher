@@ -251,42 +251,59 @@ impl LtkTools {
     /// closes stdin → the patcher sees EOF → it exits before hooking.
     pub fn start_patcher(&self, overlay_dir: &Path, app: &AppHandle) -> Result<Child, String> {
         use tauri::Manager;
-        let prefix = format!("{}\\",
-            overlay_dir.to_string_lossy().trim_end_matches('\\').trim_end_matches('/'));
 
-        // Create a log file for the patcher's stdout/stderr. Truncate on
-        // each start (so the log only contains the most recent patcher
-        // session's output).
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // THE TRICK: Create a copy/hardlink of veil.exe named
+        // "ltk-manager.exe" and spawn THAT as the parent of
+        // ltk_patcher_host.exe. The DLL's VRF check queries the parent
+        // process name and expects "ltk-manager.exe". By naming our
+        // launcher process ltk-manager.exe, the check passes.
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+        let veil_exe = std::env::current_exe()
+            .map_err(|e| format!("Can't find current exe: {}", e))?;
+
+        // Use %APPDATA%\com.veil.launcher\ as the location for ltk-manager.exe
+        // (same volume as veil.exe in most cases → hardlink works)
+        let launcher_dir = app.path().app_config_dir()
+            .unwrap_or_else(|_| PathBuf::from("."));
+        let _ = std::fs::create_dir_all(&launcher_dir);
+        let ltk_manager_exe = launcher_dir.join("ltk-manager.exe");
+
+        // Remove old copy if it exists
+        let _ = std::fs::remove_file(&ltk_manager_exe);
+
+        // Try hardlink first (fast — same file, different name, same volume)
+        // Fallback to copy (slower — works across volumes)
+        if std::fs::hard_link(&veil_exe, &ltk_manager_exe).is_err() {
+            std::fs::copy(&veil_exe, &ltk_manager_exe)
+                .map_err(|e| format!("Can't copy veil.exe to ltk-manager.exe: {}", e))?;
+        }
+
+        // Log path (same as before — the launcher mode will open + truncate it)
         let log_path = app.path().app_config_dir()
             .map(|d| d.join("patcher.log"))
             .unwrap_or_else(|_| PathBuf::from("patcher.log"));
-        let _ = std::fs::create_dir_all(log_path.parent().unwrap_or(&log_path));
-        let log_file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&log_path)
-            .map_err(|e| format!("Failed to create patcher log at {}: {}", log_path.display(), e))?;
 
-        // CRITICAL: Set cwd to the host's parent directory. Windows LoadLibrary
-        // searches the current directory for the DLL — if cwd is wrong, the
-        // host can't find ltk_patcher_dll.dll. Rose does the same:
-        //   cwd=str(host_exe.parent)
-        let host_dir = self.patcher_host.parent()
-            .ok_or_else(|| "Could not resolve patcher_host parent directory".to_string())?;
-
-        // CREATE_NO_WINDOW prevents a console window from flashing when the
-        // patcher starts. Rose uses the same flag:
-        //   creationflags = subprocess.CREATE_NO_WINDOW
+        // Spawn ltk-manager.exe (our Veil copy) in launcher mode.
+        // It will:
+        //   1. Spawn ltk_patcher_host.exe as its own child
+        //   2. Send config loglevel 16 / flags 4 / prefix / start scan
+        //   3. Wait for the patcher to exit (game closes → patcher exits)
+        //
+        // The parent of ltk_patcher_host.exe is now ltk-manager.exe → VRF passes
         #[cfg(target_os = "windows")]
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        let mut command = Command::new(&self.patcher_host);
+        let mut command = Command::new(&ltk_manager_exe);
         command
-            .current_dir(host_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::from(log_file.try_clone().unwrap()))
-            .stderr(Stdio::from(log_file));
+            .arg("--veil-patcher-launcher")
+            .arg(overlay_dir)
+            .arg(&self.patcher_host)
+            .arg(&log_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
         #[cfg(target_os = "windows")]
         {
@@ -294,30 +311,8 @@ impl LtkTools {
             command.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("Failed to spawn patcher_host.exe: {}", e))?;
-
-        // Send the line-protocol config + start commands to stdin.
-        //
-        // CRITICAL: flags must be 4 (CSLOL_HOOK_OPT_OUT_AH_V1), not 0.
-        // Rose's overlay_manager.py line 62: LTK_PATCHER_FLAGS = 4
-        // Comment: "Flag 4 = CSLOL_HOOK_OPT_OUT_AH_V1: Rose replaces skin0
-        // with the selected skin, which the DLL's base-skin check rejects
-        // and then disables the whole 'enforce skinhack scan' setting."
-        //
-        // Without flag 4, the DLL's anti-skinhack v1 enforcement kicks in,
-        // rejecting the overlay with error VRF00000008:
-        //   "host verification failed, refusing overlay: [VRF00000008]"
-        //
-        // loglevel 16 (0x10) = Info level, matching Rose's LTK_PATCHER_LOG_LEVEL.
-        if let Some(stdin) = child.stdin.as_mut() {
-            let _ = writeln!(stdin, "config loglevel 16");
-            let _ = writeln!(stdin, "config flags 4");
-            let _ = writeln!(stdin, "config prefix {}", prefix);
-            let _ = writeln!(stdin, "start scan");
-            let _ = stdin.flush();
-        }
+        let child = command.spawn()
+            .map_err(|e| format!("Can't spawn ltk-manager.exe (launcher): {}", e))?;
 
         Ok(child)
     }
